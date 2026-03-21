@@ -1,0 +1,15 @@
+[Unit]
+Description=Geotech Flashcards Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/geotech-flashcards-bot
+EnvironmentFile=/opt/geotech-flashcards-bot/.env
+ExecStart=/opt/geotech-flashcards-bot/.venv/bin/python main.py
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
