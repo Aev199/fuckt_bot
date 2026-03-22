@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards import (
     ALL_TOPICS_VALUE,
+    build_reminder_opt_in_keyboard,
     SessionActionCallbackFactory,
     build_rate_answer_keyboard,
     build_session_summary_keyboard,
@@ -128,7 +129,12 @@ async def rate_answer(
         )
         return
 
-    await show_session_summary(message=callback.message, state=state)
+    await show_session_summary(
+        message=callback.message,
+        state=state,
+        db_session=db_session,
+        user=user,
+    )
 
 
 @router.callback_query(SessionActionCallbackFactory.filter(F.action == "continue"))
@@ -146,6 +152,7 @@ async def continue_session(
     await state.update_data(
         topic=topic,
         review_only=review_only,
+        session_started_total_seen=await crud.count_seen_cards(db_session, user.id),
         session_count=0,
         knew_count=0,
         unsure_count=0,
@@ -195,7 +202,12 @@ async def send_next_card(
     remaining_slots = settings.session_cards_limit - session_count
 
     if remaining_slots <= 0:
-        await show_session_summary(message=message, state=state)
+        await show_session_summary(
+            message=message,
+            state=state,
+            db_session=db_session,
+            user=user,
+        )
         return
 
     card: Card | None = None
@@ -221,6 +233,7 @@ async def send_next_card(
             current_card_id=None,
         )
         await message.answer("Все карточки пройдены.")
+        await _maybe_offer_reminders(message=message, state=state, db_session=db_session, user=user)
         return
 
     if card.id not in shown_card_ids:
@@ -240,7 +253,12 @@ async def send_next_card(
     )
 
 
-async def show_session_summary(message: Message | None, state: FSMContext) -> None:
+async def show_session_summary(
+    message: Message | None,
+    state: FSMContext,
+    db_session: AsyncSession,
+    user: User,
+) -> None:
     if message is None:
         logger.error("show_session_summary called without a message object.")
         return
@@ -262,6 +280,7 @@ async def show_session_summary(message: Message | None, state: FSMContext) -> No
         f"Не знал: {didnt_count}",
         reply_markup=build_session_summary_keyboard(),
     )
+    await _maybe_offer_reminders(message=message, state=state, db_session=db_session, user=user)
 
 
 async def _edit_or_send_answer(
@@ -389,3 +408,27 @@ def _normalize_formula(formula: str) -> str:
     normalized = normalized.replace("{", "").replace("}", "")
     normalized = normalized.replace("\\", "")
     return normalized
+
+
+async def _maybe_offer_reminders(
+    message: Message,
+    state: FSMContext,
+    db_session: AsyncSession,
+    user: User,
+) -> None:
+    if not _should_offer_reminder_onboarding(user=user, state_data=await state.get_data()):
+        return
+
+    await message.answer(
+        "Хочешь ежедневное напоминание о повторении карточек?",
+        reply_markup=build_reminder_opt_in_keyboard(),
+    )
+
+
+def _should_offer_reminder_onboarding(user: User, state_data: dict) -> bool:
+    if user.notifications_enabled:
+        return False
+
+    session_count = int(state_data.get("session_count", 0))
+    session_started_total_seen = int(state_data.get("session_started_total_seen", 0))
+    return session_count > 0 and session_started_total_seen == 0

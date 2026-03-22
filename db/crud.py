@@ -63,6 +63,12 @@ async def get_user_by_telegram_id(session: AsyncSession, telegram_id: int) -> Us
     return result.scalar_one_or_none()
 
 
+async def get_user_by_id(session: AsyncSession, user_id: int) -> User | None:
+    statement = select(User).where(User.id == user_id)
+    result = await session.execute(statement)
+    return result.scalar_one_or_none()
+
+
 async def create_user(session: AsyncSession, telegram_id: int, username: str | None = None) -> User:
     user = User(
         telegram_id=telegram_id,
@@ -104,6 +110,12 @@ async def get_topics(session: AsyncSession) -> list[str]:
     )
     result = await session.execute(statement)
     return list(result.scalars().all())
+
+
+async def count_seen_cards(session: AsyncSession, user_id: int) -> int:
+    statement = select(func.count(UserCard.id)).where(UserCard.user_id == user_id)
+    result = await session.execute(statement)
+    return result.scalar_one()
 
 
 async def get_card_by_id(session: AsyncSession, card_id: int) -> Card | None:
@@ -211,33 +223,137 @@ async def save_result(session: AsyncSession, user_id: int, card_id: int, result:
 async def get_user_stats(session: AsyncSession, user_id: int) -> dict[str, int]:
     now = _utc_now()
 
-    total_seen_statement = select(func.count(UserCard.id)).where(UserCard.user_id == user_id)
-    total_seen = (await session.execute(total_seen_statement)).scalar_one()
+    total_seen = await count_seen_cards(session=session, user_id=user_id)
 
-    knew_statement = select(func.count(UserCard.id)).where(
-        UserCard.user_id == user_id,
-        UserCard.result == RESULT_KNEW,
-    )
-    knew_count = (await session.execute(knew_statement)).scalar_one()
+    knew_count = (
+        await session.execute(
+            select(func.count(UserCard.id)).where(
+                UserCard.user_id == user_id,
+                UserCard.result == RESULT_KNEW,
+            )
+        )
+    ).scalar_one()
 
-    unsure_statement = select(func.count(UserCard.id)).where(
-        UserCard.user_id == user_id,
-        UserCard.result == RESULT_UNSURE,
-    )
-    unsure_count = (await session.execute(unsure_statement)).scalar_one()
+    unsure_count = (
+        await session.execute(
+            select(func.count(UserCard.id)).where(
+                UserCard.user_id == user_id,
+                UserCard.result == RESULT_UNSURE,
+            )
+        )
+    ).scalar_one()
 
-    didnt_statement = select(func.count(UserCard.id)).where(
-        UserCard.user_id == user_id,
-        UserCard.result == RESULT_DIDNT,
-    )
-    didnt_count = (await session.execute(didnt_statement)).scalar_one()
+    didnt_count = (
+        await session.execute(
+            select(func.count(UserCard.id)).where(
+                UserCard.user_id == user_id,
+                UserCard.result == RESULT_DIDNT,
+            )
+        )
+    ).scalar_one()
 
-    due_statement = select(func.count(UserCard.id)).where(
-        UserCard.user_id == user_id,
-        UserCard.next_review_at.is_not(None),
-        UserCard.next_review_at <= now,
-    )
-    due_count = (await session.execute(due_statement)).scalar_one()
+    due_count = (
+        await session.execute(
+            select(func.count(UserCard.id))
+            .select_from(UserCard)
+            .join(Card, Card.id == UserCard.card_id)
+            .where(
+                UserCard.user_id == user_id,
+                UserCard.next_review_at.is_not(None),
+                UserCard.next_review_at <= now,
+                Card.active.is_(True),
+            )
+        )
+    ).scalar_one()
+
+    total_topics = (
+        await session.execute(
+            select(func.count(func.distinct(Card.topic))).where(Card.active.is_(True))
+        )
+    ).scalar_one()
+
+    topics_started = (
+        await session.execute(
+            select(func.count(func.distinct(Card.topic)))
+            .select_from(UserCard)
+            .join(Card, Card.id == UserCard.card_id)
+            .where(UserCard.user_id == user_id, Card.active.is_(True))
+        )
+    ).scalar_one()
+
+    unseen_total = (
+        await session.execute(
+            select(func.count(Card.id))
+            .select_from(Card)
+            .outerjoin(
+                UserCard,
+                and_(
+                    UserCard.card_id == Card.id,
+                    UserCard.user_id == user_id,
+                ),
+            )
+            .where(Card.active.is_(True), UserCard.id.is_(None))
+        )
+    ).scalar_one()
+
+    topic_rows = (
+        await session.execute(
+            select(Card.topic)
+            .where(Card.active.is_(True))
+            .distinct()
+            .order_by(Card.topic.asc())
+        )
+    ).scalars().all()
+
+    topics: list[dict[str, int | str]] = []
+    for topic in topic_rows:
+        viewed_in_topic = (
+            await session.execute(
+                select(func.count(UserCard.id))
+                .select_from(UserCard)
+                .join(Card, Card.id == UserCard.card_id)
+                .where(UserCard.user_id == user_id, Card.active.is_(True), Card.topic == topic)
+            )
+        ).scalar_one()
+
+        due_in_topic = (
+            await session.execute(
+                select(func.count(UserCard.id))
+                .select_from(UserCard)
+                .join(Card, Card.id == UserCard.card_id)
+                .where(
+                    UserCard.user_id == user_id,
+                    UserCard.next_review_at.is_not(None),
+                    UserCard.next_review_at <= now,
+                    Card.active.is_(True),
+                    Card.topic == topic,
+                )
+            )
+        ).scalar_one()
+
+        unseen_in_topic = (
+            await session.execute(
+                select(func.count(Card.id))
+                .select_from(Card)
+                .outerjoin(
+                    UserCard,
+                    and_(
+                        UserCard.card_id == Card.id,
+                        UserCard.user_id == user_id,
+                    ),
+                )
+                .where(Card.active.is_(True), Card.topic == topic, UserCard.id.is_(None))
+            )
+        ).scalar_one()
+
+        topics.append(
+            {
+                "topic": topic,
+                "viewed": viewed_in_topic,
+                "due": due_in_topic,
+                "unseen": unseen_in_topic,
+            }
+        )
 
     return {
         "total_seen": total_seen,
@@ -245,21 +361,33 @@ async def get_user_stats(session: AsyncSession, user_id: int) -> dict[str, int]:
         "unsure": unsure_count,
         "didnt": didnt_count,
         "due_now": due_count,
+        "unseen_total": unseen_total,
+        "topics_started": topics_started,
+        "topics_total": total_topics,
+        "topics": topics,
     }
 
 
-async def set_user_notifications(
+async def configure_user_notifications(
     session: AsyncSession,
     user_id: int,
-    enabled: bool,
+    timezone_name: str,
     notify_hour: int | None,
 ) -> User:
-    statement = select(User).where(User.id == user_id)
-    result = await session.execute(statement)
-    user = result.scalar_one()
-
-    user.notifications_enabled = enabled
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+    user.notifications_enabled = True
+    user.timezone = timezone_name
     user.notify_hour = notify_hour
+
+    await session.commit()
+    await session.refresh(user)
+    return user
+
+
+async def disable_user_notifications(session: AsyncSession, user_id: int) -> User:
+    user = (await session.execute(select(User).where(User.id == user_id))).scalar_one()
+    user.notifications_enabled = False
+    user.notify_hour = None
 
     await session.commit()
     await session.refresh(user)
@@ -285,15 +413,61 @@ async def count_due_cards(session: AsyncSession, user_id: int, topic: str | None
     return result.scalar_one()
 
 
-async def get_users_for_notification_hour(session: AsyncSession, notify_hour: int) -> list[User]:
+async def get_users_with_notifications_enabled(session: AsyncSession) -> list[User]:
     statement = (
         select(User)
         .where(
             User.is_active.is_(True),
             User.notifications_enabled.is_(True),
-            User.notify_hour == notify_hour,
         )
         .order_by(User.id.asc())
     )
     result = await session.execute(statement)
     return list(result.scalars().all())
+
+
+async def get_admin_stats(session: AsyncSession) -> dict[str, int]:
+    now = _utc_now()
+
+    total_users = (await session.execute(select(func.count(User.id)))).scalar_one()
+    users_with_progress = (
+        await session.execute(
+            select(func.count(func.distinct(UserCard.user_id))).select_from(UserCard)
+        )
+    ).scalar_one()
+    reminders_enabled = (
+        await session.execute(
+            select(func.count(User.id)).where(User.notifications_enabled.is_(True))
+        )
+    ).scalar_one()
+    active_cards = (
+        await session.execute(
+            select(func.count(Card.id)).where(Card.active.is_(True))
+        )
+    ).scalar_one()
+    active_topics = (
+        await session.execute(
+            select(func.count(func.distinct(Card.topic))).where(Card.active.is_(True))
+        )
+    ).scalar_one()
+    due_reviews_total = (
+        await session.execute(
+            select(func.count(UserCard.id))
+            .select_from(UserCard)
+            .join(Card, Card.id == UserCard.card_id)
+            .where(
+                UserCard.next_review_at.is_not(None),
+                UserCard.next_review_at <= now,
+                Card.active.is_(True),
+            )
+        )
+    ).scalar_one()
+
+    return {
+        "total_users": total_users,
+        "users_with_progress": users_with_progress,
+        "reminders_enabled": reminders_enabled,
+        "active_cards": active_cards,
+        "active_topics": active_topics,
+        "due_reviews_total": due_reviews_total,
+    }

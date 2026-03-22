@@ -7,6 +7,9 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.fsm.storage.memory import MemoryStorage
 
+from bot.commands import register_bot_commands
+from bot.handlers.admin import router as admin_router
+from bot.handlers.errors import router as errors_router
 from bot.handlers.notifications import router as notifications_router
 from bot.handlers.session import router as session_router
 from bot.handlers.start import router as start_router
@@ -33,6 +36,8 @@ def create_dispatcher() -> Dispatcher:
     dispatcher.include_router(session_router)
     dispatcher.include_router(stats_router)
     dispatcher.include_router(notifications_router)
+    dispatcher.include_router(admin_router)
+    dispatcher.include_router(errors_router)
 
     return dispatcher
 
@@ -47,6 +52,7 @@ async def main() -> None:
     dispatcher = create_dispatcher()
     scheduler = setup_scheduler(bot)
 
+    await register_bot_commands(bot)
     scheduler.start()
     logging.getLogger(__name__).info("Scheduler started")
 

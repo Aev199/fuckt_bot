@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from sqlalchemy import or_, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -137,58 +138,81 @@ async def load_cards() -> None:
     raw_cards = _load_cards_from_json(cards_path)
     prepared_cards = _ensure_no_source_duplicates(raw_cards)
 
+    async with async_session_factory() as session:
+        summary = await sync_cards(session=session, prepared_cards=prepared_cards)
+
+    logger.info(
+        "Cards sync completed: total_in_file=%s, inserted=%s, updated=%s, unchanged=%s, deactivated=%s",
+        len(prepared_cards),
+        summary["inserted"],
+        summary["updated"],
+        summary["unchanged"],
+        summary["deactivated"],
+    )
+
+
+async def sync_cards(session: AsyncSession, prepared_cards: list[dict]) -> dict[str, int]:
     source_ids = [card["source_id"] for card in prepared_cards]
     questions = [card["question"] for card in prepared_cards]
 
-    async with async_session_factory() as session:
-        existing_cards_result = await session.execute(
-            select(Card).where(
-                or_(
-                    Card.source_id.in_(source_ids),
-                    Card.question.in_(questions),
-                )
-            )
-        )
+    existing_cards: list[Card] = []
+    if source_ids or questions:
+        conditions = []
+        if source_ids:
+            conditions.append(Card.source_id.in_(source_ids))
+        if questions:
+            conditions.append(Card.question.in_(questions))
+
+        existing_cards_result = await session.execute(select(Card).where(or_(*conditions)))
         existing_cards = list(existing_cards_result.scalars().all())
-        existing_by_source_id = {card.source_id: card for card in existing_cards if card.source_id is not None}
-        existing_by_question = {card.question: card for card in existing_cards}
 
-        inserted_count = 0
-        updated_count = 0
-        unchanged_count = 0
+    existing_by_source_id = {card.source_id: card for card in existing_cards if card.source_id is not None}
+    existing_by_question = {card.question: card for card in existing_cards}
 
-        for card_data in prepared_cards:
-            existing_card = existing_by_source_id.get(card_data["source_id"])
+    inserted_count = 0
+    updated_count = 0
+    unchanged_count = 0
 
-            if existing_card is None:
-                existing_card = existing_by_question.get(card_data["question"])
+    for card_data in prepared_cards:
+        existing_card = existing_by_source_id.get(card_data["source_id"])
 
-            if existing_card is None:
-                session.add(Card(**card_data))
-                inserted_count += 1
-                continue
+        if existing_card is None:
+            existing_card = existing_by_question.get(card_data["question"])
 
-            has_changes = False
+        if existing_card is None:
+            session.add(Card(**card_data))
+            inserted_count += 1
+            continue
 
-            for field_name, field_value in card_data.items():
-                if getattr(existing_card, field_name) != field_value:
-                    setattr(existing_card, field_name, field_value)
-                    has_changes = True
+        has_changes = False
+        for field_name, field_value in card_data.items():
+            if getattr(existing_card, field_name) != field_value:
+                setattr(existing_card, field_name, field_value)
+                has_changes = True
 
-            if has_changes:
-                updated_count += 1
-            else:
-                unchanged_count += 1
+        if has_changes:
+            updated_count += 1
+        else:
+            unchanged_count += 1
 
-        await session.commit()
+    stale_query = select(Card).where(Card.source_id.is_not(None))
+    if source_ids:
+        stale_query = stale_query.where(Card.source_id.notin_(source_ids))
 
-        logger.info(
-            "Cards sync completed: total_in_file=%s, inserted=%s, updated=%s, unchanged=%s",
-            len(prepared_cards),
-            inserted_count,
-            updated_count,
-            unchanged_count,
-        )
+    stale_cards = list((await session.execute(stale_query)).scalars().all())
+    deactivated_count = 0
+    for stale_card in stale_cards:
+        if stale_card.active:
+            stale_card.active = False
+            deactivated_count += 1
+
+    await session.commit()
+    return {
+        "inserted": inserted_count,
+        "updated": updated_count,
+        "unchanged": unchanged_count,
+        "deactivated": deactivated_count,
+    }
 
 
 async def main() -> None:

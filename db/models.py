@@ -25,6 +25,7 @@ class User(Base):
         default=False,
         server_default=text("false"),
     )
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
     notify_hour: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(
         Boolean,

@@ -6,6 +6,19 @@ from aiogram.utils.keyboard import InlineKeyboardBuilder
 
 
 ALL_TOPICS_VALUE = "all"
+TIMEZONE_CHOICES = [
+    ("Калининград", "Europe/Kaliningrad"),
+    ("Москва", "Europe/Moscow"),
+    ("Минск", "Europe/Minsk"),
+    ("Киев", "Europe/Kyiv"),
+    ("Екатеринбург", "Asia/Yekaterinburg"),
+    ("Омск", "Asia/Omsk"),
+    ("Красноярск", "Asia/Krasnoyarsk"),
+    ("Иркутск", "Asia/Irkutsk"),
+    ("Якутск", "Asia/Yakutsk"),
+    ("Владивосток", "Asia/Vladivostok"),
+    ("Алматы", "Asia/Almaty"),
+]
 
 
 class TopicCallbackFactory(CallbackData, prefix="topic"):
@@ -94,18 +107,47 @@ def build_start_session_keyboard(topic: str | None = None, review_only: bool = F
     return builder.as_markup()
 
 
+def build_reminder_opt_in_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    builder.button(
+        text="Да, настроить",
+        callback_data=ReminderCallbackFactory(action="opt_in"),
+    )
+    builder.button(
+        text="Позже",
+        callback_data=ReminderCallbackFactory(action="later"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
+def build_timezone_keyboard() -> InlineKeyboardMarkup:
+    builder = InlineKeyboardBuilder()
+    for label, timezone_name in TIMEZONE_CHOICES:
+        builder.button(
+            text=label,
+            callback_data=ReminderCallbackFactory(action="set_timezone", value=timezone_name),
+        )
+    builder.button(
+        text="Отключить напоминания",
+        callback_data=ReminderCallbackFactory(action="disable"),
+    )
+    builder.adjust(1)
+    return builder.as_markup()
+
+
 def build_reminder_time_keyboard() -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
-        text="Утро (09:00 UTC)",
+        text="Утро (09:00 local)",
         callback_data=ReminderCallbackFactory(action="set_hour", value="9"),
     )
     builder.button(
-        text="День (13:00 UTC)",
+        text="День (13:00 local)",
         callback_data=ReminderCallbackFactory(action="set_hour", value="13"),
     )
     builder.button(
-        text="Вечер (18:00 UTC)",
+        text="Вечер (18:00 local)",
         callback_data=ReminderCallbackFactory(action="set_hour", value="18"),
     )
     builder.button(

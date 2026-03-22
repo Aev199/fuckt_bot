@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.keyboards import ALL_TOPICS_VALUE, SessionActionCallbackFactory, TopicCallbackFactory, build_topics_keyboard
 from bot.states import SessionStates
-from db.crud import get_topics
+from db.crud import count_seen_cards, get_topics
 from db.models import User
 
 
@@ -76,6 +76,7 @@ async def process_topic_selection(
     await state.update_data(
         topic=selected_topic,
         review_only=False,
+        session_started_total_seen=await count_seen_cards(db_session, user.id),
         session_count=0,
         knew_count=0,
         unsure_count=0,
@@ -102,6 +103,7 @@ async def start_session_from_button(
     await state.update_data(
         topic=selected_topic,
         review_only=False,
+        session_started_total_seen=await count_seen_cards(db_session, user.id),
         session_count=0,
         knew_count=0,
         unsure_count=0,
@@ -128,6 +130,7 @@ async def start_review_from_button(
     await state.update_data(
         topic=selected_topic,
         review_only=True,
+        session_started_total_seen=await count_seen_cards(db_session, user.id),
         session_count=0,
         knew_count=0,
         unsure_count=0,
@@ -158,6 +161,7 @@ async def _show_topic_selection(
     await state.update_data(
         topic=None,
         review_only=False,
+        session_started_total_seen=0,
         session_count=0,
         knew_count=0,
         unsure_count=0,

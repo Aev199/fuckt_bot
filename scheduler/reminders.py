@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -17,21 +18,21 @@ logger = logging.getLogger(__name__)
 
 
 async def run_reminders(bot: Bot) -> None:
-    current_hour_utc = datetime.now(timezone.utc).hour
+    now_utc = datetime.now(timezone.utc)
 
     async with async_session_factory() as session:
-        users = await crud.get_users_for_notification_hour(
-            session=session,
-            notify_hour=current_hour_utc,
-        )
+        users = await crud.get_users_with_notifications_enabled(session=session)
 
         if not users:
-            logger.debug("No users to notify for UTC hour %s", current_hour_utc)
+            logger.debug("No users with enabled reminders")
             return
 
-        logger.info("Preparing reminders for %s users at UTC hour %s", len(users), current_hour_utc)
+        logger.info("Preparing reminders for %s users", len(users))
 
         for user in users:
+            if not _should_send_reminder(user=user, now_utc=now_utc):
+                continue
+
             await _notify_user(bot=bot, session=session, user_id=user.id, telegram_id=user.telegram_id)
 
 
@@ -71,3 +72,16 @@ def setup_scheduler(bot: Bot) -> AsyncIOScheduler:
         replace_existing=True,
     )
     return scheduler
+
+
+def _should_send_reminder(user, now_utc: datetime) -> bool:
+    if not user.notifications_enabled or user.notify_hour is None or not user.timezone:
+        return False
+
+    try:
+        user_local_hour = now_utc.astimezone(ZoneInfo(user.timezone)).hour
+    except Exception:
+        logger.exception("Invalid timezone for user_id=%s: %s", user.id, user.timezone)
+        return False
+
+    return user_local_hour == user.notify_hour

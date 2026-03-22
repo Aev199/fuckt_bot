@@ -9,4 +9,5 @@ class SessionStates(StatesGroup):
 
 
 class NotificationStates(StatesGroup):
+    choosing_timezone = State()
     choosing_time = State()
