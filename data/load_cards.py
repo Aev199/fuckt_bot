@@ -6,7 +6,7 @@ import logging
 import sys
 from pathlib import Path
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
@@ -39,10 +39,14 @@ def _load_cards_from_json(cards_path: Path) -> list[dict]:
 
 
 def _validate_card(raw_card: dict, index: int) -> dict:
-    required_fields = ("card_type", "topic", "difficulty", "question", "answer")
+    required_fields = ("id", "card_type", "topic", "difficulty", "question", "answer")
     missing_fields = [field for field in required_fields if field not in raw_card or raw_card[field] in (None, "")]
     if missing_fields:
         raise ValueError(f"Card #{index} is missing required fields: {', '.join(missing_fields)}")
+
+    source_id = int(raw_card["id"])
+    if source_id <= 0:
+        raise ValueError(f"Card #{index} has invalid id: {source_id}")
 
     card_type = str(raw_card["card_type"]).strip()
     if card_type not in {"recall", "quiz"}:
@@ -56,6 +60,7 @@ def _validate_card(raw_card: dict, index: int) -> dict:
     answer = str(raw_card["answer"]).strip()
 
     card = {
+        "source_id": source_id,
         "card_type": card_type,
         "topic": str(raw_card["topic"]).strip(),
         "subtopic": str(raw_card["subtopic"]).strip() if raw_card.get("subtopic") else None,
@@ -90,20 +95,32 @@ def _validate_card(raw_card: dict, index: int) -> dict:
 
 
 def _ensure_no_source_duplicates(cards: list[dict]) -> list[dict]:
+    seen_source_ids: set[int] = set()
     seen_questions: set[str] = set()
+    duplicate_ids: list[int] = []
     duplicates: list[str] = []
     validated_cards: list[dict] = []
 
     for index, raw_card in enumerate(cards, start=1):
         card = _validate_card(raw_card=raw_card, index=index)
+        source_id = card["source_id"]
         normalized_question = card["question"]
+
+        if source_id in seen_source_ids:
+            duplicate_ids.append(source_id)
+            continue
 
         if normalized_question in seen_questions:
             duplicates.append(normalized_question)
             continue
 
+        seen_source_ids.add(source_id)
         seen_questions.add(normalized_question)
         validated_cards.append(card)
+
+    if duplicate_ids:
+        duplicate_id_lines = "\n".join(f"- {source_id}" for source_id in duplicate_ids)
+        raise ValueError(f"Duplicate ids found in JSON source:\n{duplicate_id_lines}")
 
     if duplicates:
         duplicate_lines = "\n".join(f"- {question}" for question in duplicates)
@@ -120,32 +137,57 @@ async def load_cards() -> None:
     raw_cards = _load_cards_from_json(cards_path)
     prepared_cards = _ensure_no_source_duplicates(raw_cards)
 
+    source_ids = [card["source_id"] for card in prepared_cards]
     questions = [card["question"] for card in prepared_cards]
 
     async with async_session_factory() as session:
-        existing_questions_result = await session.execute(
-            select(Card.question).where(Card.question.in_(questions))
+        existing_cards_result = await session.execute(
+            select(Card).where(
+                or_(
+                    Card.source_id.in_(source_ids),
+                    Card.question.in_(questions),
+                )
+            )
         )
-        existing_questions = set(existing_questions_result.scalars().all())
+        existing_cards = list(existing_cards_result.scalars().all())
+        existing_by_source_id = {card.source_id: card for card in existing_cards if card.source_id is not None}
+        existing_by_question = {card.question: card for card in existing_cards}
 
-        new_cards = [
-            Card(**card_data)
-            for card_data in prepared_cards
-            if card_data["question"] not in existing_questions
-        ]
+        inserted_count = 0
+        updated_count = 0
+        unchanged_count = 0
 
-        if not new_cards:
-            logger.info("No new cards found. Database is already up to date.")
-            return
+        for card_data in prepared_cards:
+            existing_card = existing_by_source_id.get(card_data["source_id"])
 
-        session.add_all(new_cards)
+            if existing_card is None:
+                existing_card = existing_by_question.get(card_data["question"])
+
+            if existing_card is None:
+                session.add(Card(**card_data))
+                inserted_count += 1
+                continue
+
+            has_changes = False
+
+            for field_name, field_value in card_data.items():
+                if getattr(existing_card, field_name) != field_value:
+                    setattr(existing_card, field_name, field_value)
+                    has_changes = True
+
+            if has_changes:
+                updated_count += 1
+            else:
+                unchanged_count += 1
+
         await session.commit()
 
         logger.info(
-            "Cards import completed: total_in_file=%s, already_in_db=%s, inserted=%s",
+            "Cards sync completed: total_in_file=%s, inserted=%s, updated=%s, unchanged=%s",
             len(prepared_cards),
-            len(existing_questions),
-            len(new_cards),
+            inserted_count,
+            updated_count,
+            unchanged_count,
         )
 
 

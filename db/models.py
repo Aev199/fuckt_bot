@@ -47,6 +47,7 @@ class Card(Base):
     __tablename__ = "cards"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    source_id: Mapped[int | None] = mapped_column(Integer, unique=True, index=True, nullable=True)
     card_type: Mapped[str] = mapped_column(String(20), nullable=False)
     topic: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     subtopic: Mapped[str | None] = mapped_column(String(255), nullable=True)

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import html
 import logging
+import re
 
 from aiogram import F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -24,6 +26,9 @@ from db.models import Card, User
 logger = logging.getLogger(__name__)
 
 router = Router(name="session")
+
+_CITE_PATTERN = re.compile(r"\[cite:\s*[^\]]+\]")
+_INLINE_FORMULA_PATTERN = re.compile(r"\$(.+?)\$")
 
 
 @router.callback_query(SessionActionCallbackFactory.filter(F.action == "show_answer"))
@@ -291,7 +296,7 @@ def _build_question_text(card: Card) -> str:
     topic_line = _format_card_meta(card)
     options_block = _format_options(card)
 
-    text = f"{topic_line}\n\nВопрос:\n{card.question}"
+    text = f"{topic_line}\n\nВопрос:\n{_render_card_text(card.question)}"
     if options_block:
         text += f"\n\n{options_block}"
 
@@ -306,26 +311,26 @@ def _build_answer_text(card: Card) -> str:
         topic_line,
         "",
         "Вопрос:",
-        card.question,
+        _render_card_text(card.question),
     ]
 
     if options_block:
         parts.extend(["", options_block])
 
-    parts.extend(["", "Ответ:", card.answer])
+    parts.extend(["", "Ответ:", _render_card_text(card.answer)])
 
     if card.hint:
-        parts.extend(["", f"Подсказка: {card.hint}"])
+        parts.extend(["", f"Подсказка: {_render_card_text(card.hint)}"])
 
     return "\n".join(parts)
 
 
 def _format_card_meta(card: Card) -> str:
-    topic = _humanize_label(card.topic)
+    topic = html.escape(_humanize_label(card.topic))
     meta_parts = [f"Тема: {topic}", f"Сложность: {card.difficulty}"]
 
     if card.subtopic:
-        meta_parts.insert(1, f"Подтема: {_humanize_label(card.subtopic)}")
+        meta_parts.insert(1, f"Подтема: {html.escape(_humanize_label(card.subtopic))}")
 
     return "\n".join(meta_parts)
 
@@ -334,7 +339,7 @@ def _format_options(card: Card) -> str:
     if not card.options:
         return ""
 
-    options_lines = [f"{index + 1}. {option}" for index, option in enumerate(card.options)]
+    options_lines = [f"{index + 1}. {_render_card_text(option)}" for index, option in enumerate(card.options)]
     return "Варианты:\n" + "\n".join(options_lines)
 
 
@@ -346,3 +351,41 @@ def _normalize_topic(topic: str | None) -> str | None:
     if topic is None or topic == ALL_TOPICS_VALUE:
         return None
     return topic
+
+
+def _render_card_text(text: str) -> str:
+    cleaned_text = _CITE_PATTERN.sub("", text).strip()
+    if not cleaned_text:
+        return ""
+
+    rendered_parts: list[str] = []
+    last_index = 0
+
+    for match in _INLINE_FORMULA_PATTERN.finditer(cleaned_text):
+        rendered_parts.append(html.escape(cleaned_text[last_index:match.start()]))
+        rendered_parts.append(f"<code>{html.escape(_normalize_formula(match.group(1)))}</code>")
+        last_index = match.end()
+
+    rendered_parts.append(html.escape(cleaned_text[last_index:]))
+    return "".join(rendered_parts).strip()
+
+
+def _normalize_formula(formula: str) -> str:
+    replacements = {
+        r"\le": "<=",
+        r"\ge": ">=",
+        r"\cdot": "*",
+        r"\rho": "rho",
+        r"\alpha": "alpha",
+        r"\beta": "beta",
+        r"\gamma": "gamma",
+        r"\Delta": "Delta",
+    }
+
+    normalized = formula.strip()
+    for source, target in replacements.items():
+        normalized = normalized.replace(source, target)
+
+    normalized = normalized.replace("{", "").replace("}", "")
+    normalized = normalized.replace("\\", "")
+    return normalized
