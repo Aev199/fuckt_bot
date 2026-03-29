@@ -7,9 +7,11 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
+from app.backend.db.database import Base as KnowledgeBase
+from app.backend.db import models as knowledge_models  # noqa: F401
 from config import settings
-from db.database import Base
-from db import models  # noqa: F401
+from db.database import Base as FlashcardsBase
+from db import models as flashcard_models  # noqa: F401
 
 
 config = context.config
@@ -18,7 +20,7 @@ config.set_main_option("sqlalchemy.url", settings.database_url)
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-target_metadata = Base.metadata
+target_metadata = [FlashcardsBase.metadata, KnowledgeBase.metadata]
 
 
 def run_migrations_offline() -> None:

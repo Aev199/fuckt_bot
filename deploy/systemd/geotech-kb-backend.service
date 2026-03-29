@@ -1,0 +1,15 @@
+[Unit]
+Description=Geotech Knowledge Base Backend
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/geotech-kb
+EnvironmentFile=/opt/geotech-kb/.env
+ExecStart=/opt/geotech-kb/.venv/bin/uvicorn run_backend:app --host 127.0.0.1 --port 8000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

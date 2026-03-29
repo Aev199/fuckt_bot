@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Geotech Knowledge Base</title>
+    <link rel="stylesheet" href="/static/app.css" />
+    <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  </head>
+  <body>
+    <main class="layout">
+      <header class="hero">
+        <p class="eyebrow">Mini App</p>
+        <h1>База знаний по геотехнике</h1>
+        <p class="subtitle">
+          Сохраняй полезные материалы, редактируй их прямо в приложении и находи через поиск.
+        </p>
+      </header>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Профиль</h2>
+          <button id="refreshButton" class="ghost-button" type="button">Обновить</button>
+        </div>
+        <div id="authStatus" class="status">Подключаем Telegram Mini App…</div>
+      </section>
+
+      <section class="grid">
+        <article class="panel">
+          <div class="panel-header">
+            <h2>Категории</h2>
+          </div>
+          <form id="categoryForm" class="stack-form">
+            <input id="categoryName" name="name" placeholder="Новая категория" required />
+            <button type="submit">Добавить категорию</button>
+          </form>
+          <div id="categoriesList" class="list"></div>
+        </article>
+
+        <article class="panel">
+          <div class="panel-header">
+            <div>
+              <h2 id="materialFormTitle">Добавить материал</h2>
+              <p id="materialFormSubtitle" class="panel-subtitle">Сохрани заметку, статью или выдержку.</p>
+            </div>
+            <button id="resetMaterialButton" class="ghost-button" type="button">Новый материал</button>
+          </div>
+          <form id="materialForm" class="stack-form">
+            <input id="materialTitle" name="title" placeholder="Заголовок" required />
+            <textarea id="materialContent" name="content" rows="6" placeholder="Основной текст" required></textarea>
+            <input id="materialSourceUrl" name="source_url" placeholder="Ссылка на источник" />
+            <input id="materialSourceName" name="source_name" placeholder="Источник" />
+            <textarea id="materialNotes" name="notes" rows="4" placeholder="Личные заметки"></textarea>
+            <input id="materialTags" name="tags" placeholder="Теги через запятую" />
+            <select id="materialCategory" name="category_id">
+              <option value="">Без категории</option>
+            </select>
+            <div class="action-row">
+              <button id="saveMaterialButton" type="submit">Сохранить материал</button>
+              <button id="deleteMaterialButton" class="ghost-button danger-button hidden" type="button">Удалить</button>
+            </div>
+          </form>
+        </article>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Материалы</h2>
+          <div class="filters">
+            <input id="searchInput" placeholder="Поиск по материалам" />
+            <select id="searchCategory">
+              <option value="">Все категории</option>
+            </select>
+            <label class="favorite-filter">
+              <input type="checkbox" id="favoriteOnly" />
+              Только избранное
+            </label>
+          </div>
+        </div>
+        <div id="materialsList" class="materials"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Карточка материала</h2>
+        </div>
+        <div id="materialDetail" class="detail-empty">Выбери материал из списка, чтобы посмотреть детали.</div>
+      </section>
+    </main>
+
+    <template id="materialTemplate">
+      <article class="material-card">
+        <div class="material-topline">
+          <h3 class="material-title"></h3>
+          <button class="icon-button favorite-button" type="button">☆</button>
+        </div>
+        <p class="material-meta"></p>
+        <p class="material-content"></p>
+        <p class="material-tags"></p>
+        <div class="action-row compact">
+          <button class="ghost-button open-button" type="button">Открыть</button>
+        </div>
+      </article>
+    </template>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

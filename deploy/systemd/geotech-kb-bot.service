@@ -1,0 +1,15 @@
+[Unit]
+Description=Geotech Knowledge Base Telegram Bot
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/opt/geotech-kb
+EnvironmentFile=/opt/geotech-kb/.env
+ExecStart=/opt/geotech-kb/.venv/bin/python -m app.bot.main
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

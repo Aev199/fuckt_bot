@@ -17,6 +17,10 @@ class Settings(BaseSettings):
 
     bot_parse_mode: str = Field(default="HTML", alias="BOT_PARSE_MODE")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
+    mini_app_url: str = Field(default="http://127.0.0.1:8000/app", alias="MINI_APP_URL")
+    backend_host: str = Field(default="127.0.0.1", alias="BACKEND_HOST")
+    backend_port: int = Field(default=8000, alias="BACKEND_PORT")
+    backend_cors_origins: list[str] = Field(default=["*"], alias="BACKEND_CORS_ORIGINS")
     session_cards_limit: int = Field(default=5, alias="SESSION_CARDS_LIMIT")
     review_interval_knew_days: int = Field(default=7, alias="REVIEW_INTERVAL_KNEW_DAYS")
     review_interval_unsure_days: int = Field(default=1, alias="REVIEW_INTERVAL_UNSURE_DAYS")
