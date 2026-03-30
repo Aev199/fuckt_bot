@@ -1,7 +1,14 @@
 from __future__ import annotations
 
 from aiogram import Bot
-from aiogram.types import BotCommand, BotCommandScopeAllPrivateChats
+from aiogram.types import (
+    BotCommand,
+    BotCommandScopeAllPrivateChats,
+    BotCommandScopeChat,
+    BotCommandScopeDefault,
+)
+
+from config import settings
 
 
 BOT_COMMANDS = [
@@ -15,4 +22,14 @@ BOT_COMMANDS = [
 
 
 async def register_bot_commands(bot: Bot) -> None:
-    await bot.set_my_commands(BOT_COMMANDS, scope=BotCommandScopeAllPrivateChats())
+    default_scope = BotCommandScopeDefault()
+    private_scope = BotCommandScopeAllPrivateChats()
+    admin_chat_scope = BotCommandScopeChat(chat_id=settings.admin_id)
+
+    await bot.delete_my_commands(scope=default_scope)
+    await bot.delete_my_commands(scope=private_scope)
+    await bot.delete_my_commands(scope=admin_chat_scope)
+
+    await bot.set_my_commands(BOT_COMMANDS, scope=default_scope)
+    await bot.set_my_commands(BOT_COMMANDS, scope=private_scope)
+    await bot.set_my_commands(BOT_COMMANDS, scope=admin_chat_scope)
