@@ -3,8 +3,10 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.backend.api.dependencies import get_current_user
 from app.backend.db import crud
 from app.backend.db.database import get_session
+from app.backend.db.models import User
 from app.backend.schemas.common import TelegramAuthRequest
 from app.backend.services.telegram_auth import validate_init_data
 
@@ -23,6 +25,15 @@ async def auth_via_telegram(
         telegram_id=telegram_user.telegram_id,
         username=telegram_user.username,
     )
+    return {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "username": user.username,
+    }
+
+
+@router.get("/me")
+async def auth_me(user: User = Depends(get_current_user)) -> dict:
     return {
         "id": user.id,
         "telegram_id": user.telegram_id,

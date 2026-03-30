@@ -46,7 +46,7 @@ async def health() -> dict[str, str]:
 async def root() -> dict[str, str]:
     return {
         "name": "Geotech Knowledge Base API",
-        "mini_app": settings.mini_app_url,
+        "web_cabinet": settings.mini_app_url,
     }
 
 

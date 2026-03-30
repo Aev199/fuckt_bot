@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     bot_parse_mode: str = Field(default="HTML", alias="BOT_PARSE_MODE")
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     mini_app_url: str = Field(default="http://127.0.0.1:8000/app", alias="MINI_APP_URL")
+    web_cabinet_token: str | None = Field(default=None, alias="WEB_CABINET_TOKEN")
     backend_host: str = Field(default="127.0.0.1", alias="BACKEND_HOST")
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
     backend_cors_origins: list[str] = Field(default=["*"], alias="BACKEND_CORS_ORIGINS")

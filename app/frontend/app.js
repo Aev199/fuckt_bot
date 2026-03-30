@@ -1,6 +1,7 @@
 const tg = window.Telegram?.WebApp;
 const state = {
   initData: "",
+  cabinetToken: "",
   categories: [],
   materials: [],
   selectedMaterialId: null,
@@ -42,12 +43,28 @@ function getRequestedView() {
   return new URLSearchParams(window.location.search).get("view");
 }
 
+function getRequestedMaterialId() {
+  const rawValue = new URLSearchParams(window.location.search).get("material_id");
+  return rawValue ? Number(rawValue) : null;
+}
+
+function getCabinetToken() {
+  const params = new URLSearchParams(window.location.search);
+  const tokenFromQuery = params.get("token");
+  if (tokenFromQuery) {
+    window.localStorage.setItem("webCabinetToken", tokenFromQuery);
+    return tokenFromQuery;
+  }
+  return window.localStorage.getItem("webCabinetToken") || "";
+}
+
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
     ...options,
     headers: {
       "Content-Type": "application/json",
       "X-Telegram-Init-Data": state.initData,
+      "X-Web-Cabinet-Token": state.cabinetToken,
       ...(options.headers || {}),
     },
   });
@@ -62,15 +79,22 @@ async function apiRequest(path, options = {}) {
 
 async function authenticate() {
   state.initData = getInitData();
-  if (!state.initData) {
-    authStatus.textContent = "Mini App запущен вне Telegram. Для полной работы нужен запуск из бота.";
+  state.cabinetToken = getCabinetToken();
+
+  if (!state.initData && !state.cabinetToken) {
+    authStatus.textContent = "Для web-кабинета нужен токен доступа или запуск из Telegram.";
     return;
   }
 
-  const user = await apiRequest("/api/auth/telegram", {
-    method: "POST",
-    body: JSON.stringify({ init_data: state.initData }),
-  });
+  let user;
+  if (state.initData) {
+    user = await apiRequest("/api/auth/telegram", {
+      method: "POST",
+      body: JSON.stringify({ init_data: state.initData }),
+    });
+  } else {
+    user = await apiRequest("/api/auth/me");
+  }
 
   authStatus.textContent = `Подключено: @${user.username || "user"} (telegram_id: ${user.telegram_id})`;
 }
@@ -91,11 +115,15 @@ function renderCategories() {
     item.innerHTML = `<strong>${escapeHtml(category.name)}</strong><span>${category.materials_count} материалов</span>`;
     categoriesList.appendChild(item);
 
-    const option = document.createElement("option");
-    option.value = String(category.id);
-    option.textContent = category.name;
-    materialCategorySelect.appendChild(option.cloneNode(true));
-    searchCategorySelect.appendChild(option);
+    const materialOption = document.createElement("option");
+    materialOption.value = String(category.id);
+    materialOption.textContent = category.name;
+    materialCategorySelect.appendChild(materialOption);
+
+    const searchOption = document.createElement("option");
+    searchOption.value = String(category.id);
+    searchOption.textContent = category.name;
+    searchCategorySelect.appendChild(searchOption);
   }
 }
 
@@ -121,6 +149,9 @@ function renderMaterials() {
     favoriteButton.addEventListener("click", async () => {
       await apiRequest(`/api/materials/${material.id}/favorite`, { method: "POST" });
       await loadMaterials();
+      if (state.selectedMaterialId === material.id) {
+        await openMaterial(material.id);
+      }
     });
 
     node.querySelector(".open-button").addEventListener("click", async () => {
@@ -305,6 +336,12 @@ async function bootstrap() {
     await loadCategories();
     await loadMaterials();
     startCreateMode();
+
+    const requestedMaterialId = getRequestedMaterialId();
+    if (requestedMaterialId) {
+      await openMaterial(requestedMaterialId);
+      return;
+    }
 
     if (getRequestedView() === "add") {
       materialTitleInput.focus();
