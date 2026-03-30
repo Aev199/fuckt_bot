@@ -1,5 +1,6 @@
 aiogram==3.26.0
 fastapi==0.115.12
+httpx==0.28.1
 SQLAlchemy==2.0.48
 alembic==1.18.4
 APScheduler==3.11.2

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from urllib.parse import urlencode
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.exceptions import TelegramBadRequest
 from aiogram.filters import Command, StateFilter
 from aiogram.fsm.context import FSMContext
@@ -22,7 +22,7 @@ from app.bot.keyboards import (
     build_material_detail_keyboard,
     build_materials_keyboard,
 )
-from app.bot.states import AddMaterialStates, CategoryStates, SearchStates
+from app.bot.states import AddMaterialStates, AttachmentStates, CategoryStates, SearchStates
 from config import settings
 
 
@@ -173,18 +173,13 @@ async def show_material(
     try:
         material = await crud.get_material(session=db_session, user_id=user.id, material_id=material_id)
     except ValueError:
-        await _edit_or_answer(
-            callback,
-            "Материал не найден.",
-            build_back_home_keyboard(),
-        )
+        await _edit_or_answer(callback, "Материал не найден.", build_back_home_keyboard())
         return
 
-    serialized = crud.serialize_material(material)
     await _edit_or_answer(
         callback,
-        _material_text(serialized),
-        build_material_detail_keyboard(serialized.id, serialized.is_favorite),
+        _material_text(crud.serialize_material(material)),
+        _material_keyboard(material),
     )
 
 
@@ -197,13 +192,59 @@ async def toggle_favorite(
 ) -> None:
     material_id = int(callback_data.value or "0")
     material = await crud.toggle_favorite(session=db_session, user_id=user.id, material_id=material_id)
-    serialized = crud.serialize_material(material)
     await callback.answer("Обновил избранное")
-    await _edit_or_answer(
-        callback,
-        _material_text(serialized),
-        build_material_detail_keyboard(serialized.id, serialized.is_favorite),
-    )
+    await _edit_or_answer(callback, _material_text(crud.serialize_material(material)), _material_keyboard(material))
+
+
+@router.callback_query(AppNav.filter(F.screen == "attach_photo"))
+async def start_attach_photo(
+    callback: CallbackQuery,
+    callback_data: AppNav,
+    state: FSMContext,
+) -> None:
+    material_id = int(callback_data.value or "0")
+    await state.set_state(AttachmentStates.waiting_photo)
+    await state.update_data(material_id=material_id)
+    await callback.answer()
+    if callback.message:
+        await callback.message.answer(
+            "Отправь фотографию одним сообщением.\n"
+            "Подпись к фото сохранится как подпись вложения.\n"
+            "Если передумал, нажми /menu."
+        )
+
+
+@router.callback_query(AppNav.filter(F.screen == "show_photos"))
+async def show_photos(
+    callback: CallbackQuery,
+    callback_data: AppNav,
+    db_session: AsyncSession,
+    user: User,
+) -> None:
+    material_id = int(callback_data.value or "0")
+    try:
+        material = await crud.get_material(session=db_session, user_id=user.id, material_id=material_id)
+    except ValueError:
+        await callback.answer("Материал не найден", show_alert=True)
+        return
+
+    if not material.attachments:
+        await callback.answer("У этого материала пока нет фото", show_alert=True)
+        return
+
+    await callback.answer()
+    total = len(material.attachments)
+    for index, attachment in enumerate(material.attachments, start=1):
+        if not attachment.telegram_file_id or callback.message is None:
+            continue
+
+        caption_parts = [f"{material.title}\nФото {index} из {total}"]
+        if attachment.caption:
+            caption_parts.extend(["", attachment.caption])
+        await callback.message.answer_photo(
+            photo=attachment.telegram_file_id,
+            caption="\n".join(caption_parts),
+        )
 
 
 @router.callback_query(AppNav.filter(F.screen == "delete_material"))
@@ -383,12 +424,51 @@ async def add_tags(
         tags=_parse_tags(message.text),
     )
     material = await crud.create_material(session=db_session, user_id=user.id, payload=payload)
-    serialized = crud.serialize_material(material)
     await state.clear()
     await message.answer(
-        "Материал сохранён.\n\n" + _material_text(serialized),
-        reply_markup=build_material_detail_keyboard(serialized.id, serialized.is_favorite),
+        "Материал сохранён.\n\n" + _material_text(crud.serialize_material(material)),
+        reply_markup=_material_keyboard(material),
     )
+
+
+@router.message(AttachmentStates.waiting_photo, F.photo)
+async def save_attachment_photo(
+    message: Message,
+    state: FSMContext,
+    db_session: AsyncSession,
+    user: User,
+    bot: Bot,
+) -> None:
+    state_data = await state.get_data()
+    material_id = state_data.get("material_id")
+    if material_id is None:
+        await state.clear()
+        await message.answer("Не удалось понять, к какому материалу прикрепить фото. Попробуй снова из карточки материала.")
+        return
+
+    photo = message.photo[-1]
+    telegram_file = await bot.get_file(photo.file_id)
+    await crud.add_material_attachment(
+        session=db_session,
+        user_id=user.id,
+        material_id=int(material_id),
+        telegram_file_id=photo.file_id,
+        file_path=telegram_file.file_path,
+        file_name=f"telegram_photo_{photo.file_unique_id}.jpg",
+        mime_type="image/jpeg",
+        caption=(message.caption or "").strip() or None,
+    )
+    material = await crud.get_material(session=db_session, user_id=user.id, material_id=int(material_id))
+    await state.clear()
+    await message.answer(
+        "Фото добавлено.\n\n" + _material_text(crud.serialize_material(material)),
+        reply_markup=_material_keyboard(material),
+    )
+
+
+@router.message(AttachmentStates.waiting_photo)
+async def attachment_waiting_non_photo(message: Message) -> None:
+    await message.answer("Сейчас я жду фотографию. Отправь фото одним сообщением или нажми /menu для выхода.")
 
 
 async def _start_add_flow(message: Message, state: FSMContext) -> None:
@@ -420,6 +500,7 @@ def _home_text() -> str:
         "База знаний по геотехнике\n\n"
         "Что можно делать:\n"
         "• быстро сохранять полезные материалы\n"
+        "• прикреплять фото к материалам\n"
         "• искать по ключевым словам\n"
         "• ходить по категориям\n"
         "• открывать избранное и последние материалы\n"
@@ -443,7 +524,8 @@ def _materials_list_text(title: str, materials: list) -> str:
 
     lines = [title, ""]
     for material in materials[:10]:
-        lines.append(f"• {material.title}")
+        attachment_suffix = f" [{len(material.attachments)} фото]" if getattr(material, "attachments", None) else ""
+        lines.append(f"• {material.title}{attachment_suffix}")
     return "\n".join(lines)
 
 
@@ -466,6 +548,9 @@ def _material_text(material) -> str:
 
     if material.tags:
         parts.extend(["", f"Теги: {', '.join(material.tags)}"])
+
+    if material.attachments:
+        parts.extend(["", f"Вложений: {len(material.attachments)}"])
 
     if material.is_favorite:
         parts.extend(["", "★ В избранном"])
@@ -497,3 +582,11 @@ def _build_web_message_url() -> str:
 
     separator = "&" if "?" in settings.mini_app_url else "?"
     return f"{settings.mini_app_url}{separator}{urlencode(query)}"
+
+
+def _material_keyboard(material) -> object:
+    return build_material_detail_keyboard(
+        material_id=material.id,
+        is_favorite=material.is_favorite,
+        attachments_count=len(material.attachments),
+    )

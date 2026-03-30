@@ -6,9 +6,9 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.backend.db.models import Category, Material, MaterialTag, Tag, User
+from app.backend.db.models import Category, Material, MaterialAttachment, MaterialTag, Tag, User
 from app.backend.schemas.category import CategoryCreate
-from app.backend.schemas.material import MaterialCreate, MaterialRead, MaterialUpdate
+from app.backend.schemas.material import MaterialAttachmentRead, MaterialCreate, MaterialRead, MaterialUpdate
 
 
 _SLUG_RE = re.compile(r"[^a-z0-9]+")
@@ -117,7 +117,8 @@ async def list_materials(
 ) -> tuple[list[Material], int]:
     statement = (
         select(Material)
-        .options(selectinload(Material.category), selectinload(Material.material_tags).selectinload(MaterialTag.tag))
+        .execution_options(populate_existing=True)
+        .options(*_material_load_options())
         .where(Material.user_id == user_id)
         .order_by(Material.updated_at.desc(), Material.created_at.desc())
     )
@@ -153,7 +154,8 @@ async def get_material(session: AsyncSession, user_id: int, material_id: int) ->
     material = (
         await session.execute(
             select(Material)
-            .options(selectinload(Material.category), selectinload(Material.material_tags).selectinload(MaterialTag.tag))
+            .execution_options(populate_existing=True)
+            .options(*_material_load_options())
             .where(Material.id == material_id, Material.user_id == user_id)
         )
     ).scalar_one_or_none()
@@ -195,6 +197,87 @@ async def toggle_favorite(session: AsyncSession, user_id: int, material_id: int)
     return await get_material(session, user_id=user_id, material_id=material.id)
 
 
+async def add_material_attachment(
+    session: AsyncSession,
+    user_id: int,
+    material_id: int,
+    telegram_file_id: str | None,
+    file_path: str | None,
+    file_name: str | None = None,
+    mime_type: str | None = None,
+    caption: str | None = None,
+) -> MaterialAttachment:
+    material = await get_material(session=session, user_id=user_id, material_id=material_id)
+    sort_order = (
+        await session.execute(
+            select(func.count(MaterialAttachment.id)).where(MaterialAttachment.material_id == material.id)
+        )
+    ).scalar_one()
+    attachment = MaterialAttachment(
+        material_id=material.id,
+        telegram_file_id=telegram_file_id,
+        file_path=file_path,
+        file_name=file_name,
+        mime_type=mime_type,
+        caption=caption,
+        sort_order=sort_order,
+    )
+    session.add(attachment)
+    await session.commit()
+    await session.refresh(attachment)
+    return attachment
+
+
+async def get_material_attachment(
+    session: AsyncSession,
+    user_id: int,
+    material_id: int,
+    attachment_id: int,
+) -> MaterialAttachment:
+    attachment = (
+        await session.execute(
+            select(MaterialAttachment)
+            .join(Material, Material.id == MaterialAttachment.material_id)
+            .where(
+                MaterialAttachment.id == attachment_id,
+                MaterialAttachment.material_id == material_id,
+                Material.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if attachment is None:
+        raise ValueError("Attachment not found")
+    return attachment
+
+
+async def delete_material_attachment(
+    session: AsyncSession,
+    user_id: int,
+    material_id: int,
+    attachment_id: int,
+) -> None:
+    attachment = await get_material_attachment(
+        session=session,
+        user_id=user_id,
+        material_id=material_id,
+        attachment_id=attachment_id,
+    )
+    await session.delete(attachment)
+    await session.flush()
+
+    remaining = (
+        await session.execute(
+            select(MaterialAttachment)
+            .where(MaterialAttachment.material_id == material_id)
+            .order_by(MaterialAttachment.sort_order.asc(), MaterialAttachment.id.asc())
+        )
+    ).scalars().all()
+    for index, item in enumerate(remaining):
+        item.sort_order = index
+
+    await session.commit()
+
+
 def serialize_material(material: Material) -> MaterialRead:
     return MaterialRead(
         id=material.id,
@@ -207,6 +290,18 @@ def serialize_material(material: Material) -> MaterialRead:
         category_id=material.category_id,
         category_name=material.category.name if material.category else None,
         tags=[material_tag.tag.name for material_tag in material.material_tags],
+        attachments=[
+            MaterialAttachmentRead(
+                id=attachment.id,
+                telegram_file_id=attachment.telegram_file_id,
+                file_name=attachment.file_name,
+                mime_type=attachment.mime_type,
+                caption=attachment.caption,
+                sort_order=attachment.sort_order,
+                created_at=attachment.created_at,
+            )
+            for attachment in material.attachments
+        ],
         created_at=material.created_at,
         updated_at=material.updated_at,
     )
@@ -234,7 +329,9 @@ async def _ensure_category_belongs_to_user(session: AsyncSession, user_id: int, 
 async def _sync_tags(session: AsyncSession, material: Material, user_id: int, tags: list[str]) -> None:
     normalized_tags = [tag.strip() for tag in tags if tag.strip()]
 
-    existing_links = list(material.material_tags)
+    existing_links = (
+        await session.execute(select(MaterialTag).where(MaterialTag.material_id == material.id))
+    ).scalars().all()
     for link in existing_links:
         await session.delete(link)
     await session.flush()
@@ -250,3 +347,11 @@ async def _sync_tags(session: AsyncSession, material: Material, user_id: int, ta
             await session.flush()
 
         session.add(MaterialTag(material_id=material.id, tag_id=tag.id))
+
+
+def _material_load_options():
+    return (
+        selectinload(Material.category),
+        selectinload(Material.material_tags).selectinload(MaterialTag.tag),
+        selectinload(Material.attachments),
+    )

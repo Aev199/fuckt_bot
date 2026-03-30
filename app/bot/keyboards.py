@@ -62,12 +62,21 @@ def build_materials_keyboard(materials: list, back_screen: str, back_value: str 
     return builder.as_markup()
 
 
-def build_material_detail_keyboard(material_id: int, is_favorite: bool) -> InlineKeyboardMarkup:
+def build_material_detail_keyboard(material_id: int, is_favorite: bool, attachments_count: int = 0) -> InlineKeyboardMarkup:
     builder = InlineKeyboardBuilder()
     builder.button(
         text="Убрать из избранного" if is_favorite else "В избранное",
         callback_data=AppNav(screen="toggle_favorite", value=str(material_id)),
     )
+    builder.button(
+        text="Добавить фото",
+        callback_data=AppNav(screen="attach_photo", value=str(material_id)),
+    )
+    if attachments_count > 0:
+        builder.button(
+            text=f"Показать фото ({attachments_count})",
+            callback_data=AppNav(screen="show_photos", value=str(material_id)),
+        )
     builder.button(
         text="Удалить",
         callback_data=AppNav(screen="delete_material", value=str(material_id)),

@@ -17,3 +17,7 @@ class SearchStates(StatesGroup):
 
 class CategoryStates(StatesGroup):
     creating_name = State()
+
+
+class AttachmentStates(StatesGroup):
+    waiting_photo = State()

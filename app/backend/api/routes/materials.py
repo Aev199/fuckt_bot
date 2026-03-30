@@ -1,14 +1,15 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.api.dependencies import get_current_user
+from app.backend.api.dependencies import get_current_user, get_current_user_for_media
 from app.backend.db import crud
 from app.backend.db.database import get_session
 from app.backend.db.models import User
 from app.backend.schemas.common import MessageResponse
 from app.backend.schemas.material import MaterialCreate, MaterialListResponse, MaterialUpdate
+from app.backend.services.telegram_files import download_telegram_file
 
 
 router = APIRouter(prefix="/api/materials", tags=["materials"])
@@ -100,3 +101,50 @@ async def toggle_favorite(
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
     return crud.serialize_material(material).model_dump(mode="json")
+
+
+@router.get("/{material_id}/attachments/{attachment_id}/content")
+async def get_attachment_content(
+    material_id: int,
+    attachment_id: int,
+    user: User = Depends(get_current_user_for_media),
+    session: AsyncSession = Depends(get_session),
+) -> Response:
+    try:
+        attachment = await crud.get_material_attachment(
+            session=session,
+            user_id=user.id,
+            material_id=material_id,
+            attachment_id=attachment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+
+    if not attachment.file_path:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment file path is missing")
+
+    try:
+        content = await download_telegram_file(attachment.file_path)
+    except Exception as exc:
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Failed to download attachment") from exc
+
+    return Response(content=content, media_type=attachment.mime_type or "application/octet-stream")
+
+
+@router.delete("/{material_id}/attachments/{attachment_id}", response_model=MessageResponse)
+async def delete_attachment(
+    material_id: int,
+    attachment_id: int,
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> MessageResponse:
+    try:
+        await crud.delete_material_attachment(
+            session=session,
+            user_id=user.id,
+            material_id=material_id,
+            attachment_id=attachment_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(exc)) from exc
+    return MessageResponse(message="Attachment deleted")

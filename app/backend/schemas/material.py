@@ -5,6 +5,18 @@ from datetime import datetime
 from pydantic import BaseModel, ConfigDict, Field
 
 
+class MaterialAttachmentRead(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    telegram_file_id: str | None
+    file_name: str | None
+    mime_type: str | None
+    caption: str | None
+    sort_order: int
+    created_at: datetime
+
+
 class MaterialBase(BaseModel):
     title: str = Field(min_length=1, max_length=255)
     content: str = Field(min_length=1)
@@ -43,6 +55,7 @@ class MaterialRead(BaseModel):
     category_id: int | None
     category_name: str | None = None
     tags: list[str] = []
+    attachments: list[MaterialAttachmentRead] = []
     created_at: datetime
     updated_at: datetime
 

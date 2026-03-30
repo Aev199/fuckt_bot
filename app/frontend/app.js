@@ -58,6 +58,16 @@ function getCabinetToken() {
   return window.localStorage.getItem("webCabinetToken") || "";
 }
 
+function getAttachmentUrl(materialId, attachmentId) {
+  const params = new URLSearchParams();
+  if (state.cabinetToken) {
+    params.set("token", state.cabinetToken);
+  } else if (state.initData) {
+    params.set("init_data", state.initData);
+  }
+  return `/api/materials/${materialId}/attachments/${attachmentId}/content?${params.toString()}`;
+}
+
 async function apiRequest(path, options = {}) {
   const response = await fetch(path, {
     ...options,
@@ -143,6 +153,9 @@ function renderMaterials() {
     node.querySelector(".material-content").textContent = truncateText(material.content, 180);
     node.querySelector(".material-tags").textContent =
       material.tags.length ? `Теги: ${material.tags.join(", ")}` : "Теги не указаны";
+    if (material.attachments?.length) {
+      node.querySelector(".material-tags").textContent += ` • Фото: ${material.attachments.length}`;
+    }
 
     const favoriteButton = node.querySelector(".favorite-button");
     favoriteButton.textContent = material.is_favorite ? "★" : "☆";
@@ -169,6 +182,31 @@ function renderMaterialDetail(material) {
     return;
   }
 
+  const attachmentsHtml = (material.attachments || []).length
+    ? `
+      <div class="detail-label">Вложения</div>
+      <div class="attachment-grid">
+        ${material.attachments
+          .map(
+            (attachment) => `
+              <figure class="attachment-card" data-attachment-id="${attachment.id}">
+                <img
+                  src="${escapeAttribute(getAttachmentUrl(material.id, attachment.id))}"
+                  alt="${escapeAttribute(attachment.caption || material.title)}"
+                  class="attachment-image"
+                />
+                <figcaption>${escapeHtml(attachment.caption || attachment.file_name || "Фото")}</figcaption>
+                <button class="ghost-button danger-button delete-attachment-button" type="button" data-attachment-id="${attachment.id}">
+                  Удалить фото
+                </button>
+              </figure>
+            `,
+          )
+          .join("")}
+      </div>
+    `
+    : "";
+
   materialDetail.className = "detail-card";
   materialDetail.innerHTML = `
     <div class="detail-label">Заголовок</div>
@@ -181,7 +219,15 @@ function renderMaterialDetail(material) {
     ${material.notes ? `<div class="detail-label">Заметки</div><p class="detail-notes">${escapeHtml(material.notes)}</p>` : ""}
     <div class="detail-label">Теги</div>
     <p class="material-tags">${material.tags.length ? escapeHtml(material.tags.join(", ")) : "Теги не указаны"}</p>
+    ${attachmentsHtml}
   `;
+
+  for (const button of materialDetail.querySelectorAll(".delete-attachment-button")) {
+    button.addEventListener("click", async () => {
+      const attachmentId = Number(button.dataset.attachmentId);
+      await deleteAttachment(material.id, attachmentId);
+    });
+  }
 }
 
 function startCreateMode() {
@@ -306,6 +352,15 @@ async function deleteSelectedMaterial() {
   await loadMaterials();
   await loadCategories();
   startCreateMode();
+}
+
+async function deleteAttachment(materialId, attachmentId) {
+  await apiRequest(`/api/materials/${materialId}/attachments/${attachmentId}`, {
+    method: "DELETE",
+  });
+  await loadMaterials();
+  await loadCategories();
+  await openMaterial(materialId);
 }
 
 function truncateText(text, maxLength) {

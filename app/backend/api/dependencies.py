@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import Depends, Header, HTTPException, status
+from fastapi import Depends, Header, HTTPException, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.backend.db import crud
@@ -33,3 +33,26 @@ async def get_current_user(
         )
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing valid auth header")
+
+
+async def get_current_user_for_media(
+    init_data: Annotated[str | None, Query()] = None,
+    token: Annotated[str | None, Query()] = None,
+    session: AsyncSession = Depends(get_session),
+) -> User:
+    if init_data:
+        telegram_user = validate_init_data(init_data)
+        return await crud.get_or_create_user(
+            session=session,
+            telegram_id=telegram_user.telegram_id,
+            username=telegram_user.username,
+        )
+
+    if settings.web_cabinet_token and token == settings.web_cabinet_token:
+        return await crud.get_or_create_user(
+            session=session,
+            telegram_id=settings.admin_id,
+            username="admin",
+        )
+
+    raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing valid media auth")
