@@ -5,9 +5,13 @@ const state = {
   categories: [],
   materials: [],
   selectedMaterialId: null,
+  currentUser: null,
+  canEdit: false,
 };
 
 const authStatus = document.getElementById("authStatus");
+const accessStatus = document.getElementById("accessStatus");
+const globalStatus = document.getElementById("globalStatus");
 const refreshButton = document.getElementById("refreshButton");
 const categoryForm = document.getElementById("categoryForm");
 const categoryNameInput = document.getElementById("categoryName");
@@ -39,10 +43,6 @@ function getInitData() {
   return new URLSearchParams(window.location.search).get("initData") || "";
 }
 
-function getRequestedView() {
-  return new URLSearchParams(window.location.search).get("view");
-}
-
 function getRequestedMaterialId() {
   const rawValue = new URLSearchParams(window.location.search).get("material_id");
   return rawValue ? Number(rawValue) : null;
@@ -66,6 +66,36 @@ function getAttachmentUrl(materialId, attachmentId) {
     params.set("init_data", state.initData);
   }
   return `/api/materials/${materialId}/attachments/${attachmentId}/content?${params.toString()}`;
+}
+
+function setGlobalStatus(message, type = "info") {
+  globalStatus.textContent = message;
+  globalStatus.className = `status-banner ${type}`;
+}
+
+function clearGlobalStatus() {
+  globalStatus.textContent = "";
+  globalStatus.className = "status-banner hidden";
+}
+
+function updateEditAccessUi() {
+  const formControls = materialForm.querySelectorAll("input, textarea, select, button");
+  const categoryControls = categoryForm.querySelectorAll("input, button");
+
+  for (const element of formControls) {
+    element.disabled = !state.canEdit;
+  }
+  for (const element of categoryControls) {
+    element.disabled = !state.canEdit;
+  }
+
+  saveMaterialButton.classList.toggle("hidden", !state.canEdit);
+  deleteMaterialButton.classList.toggle("hidden", !state.canEdit || !state.selectedMaterialId);
+  resetMaterialButton.disabled = !state.canEdit;
+
+  accessStatus.textContent = state.canEdit
+    ? "У тебя есть права редактирования через web."
+    : "Режим только для чтения: смотреть можно, изменять через web нельзя.";
 }
 
 async function apiRequest(path, options = {}) {
@@ -106,7 +136,10 @@ async function authenticate() {
     user = await apiRequest("/api/auth/me");
   }
 
+  state.currentUser = user;
+  state.canEdit = Boolean(user.can_edit);
   authStatus.textContent = `Подключено: @${user.username || "user"} (telegram_id: ${user.telegram_id})`;
+  updateEditAccessUi();
 }
 
 function renderCategories() {
@@ -141,7 +174,7 @@ function renderMaterials() {
   materialsList.innerHTML = "";
 
   if (!state.materials.length) {
-    materialsList.innerHTML = '<div class="empty">Материалов пока нет. Добавь первый.</div>';
+    materialsList.innerHTML = '<div class="empty">Материалов пока нет.</div>';
     return;
   }
 
@@ -153,17 +186,26 @@ function renderMaterials() {
     node.querySelector(".material-content").textContent = truncateText(material.content, 180);
     node.querySelector(".material-tags").textContent =
       material.tags.length ? `Теги: ${material.tags.join(", ")}` : "Теги не указаны";
+
     if (material.attachments?.length) {
       node.querySelector(".material-tags").textContent += ` • Фото: ${material.attachments.length}`;
     }
 
     const favoriteButton = node.querySelector(".favorite-button");
     favoriteButton.textContent = material.is_favorite ? "★" : "☆";
+    favoriteButton.disabled = !state.canEdit;
+    favoriteButton.classList.toggle("hidden", !state.canEdit);
     favoriteButton.addEventListener("click", async () => {
-      await apiRequest(`/api/materials/${material.id}/favorite`, { method: "POST" });
-      await loadMaterials();
-      if (state.selectedMaterialId === material.id) {
-        await openMaterial(material.id);
+      try {
+        clearGlobalStatus();
+        await apiRequest(`/api/materials/${material.id}/favorite`, { method: "POST" });
+        setGlobalStatus("Избранное обновлено.", "success");
+        await loadMaterials();
+        if (state.selectedMaterialId === material.id) {
+          await openMaterial(material.id);
+        }
+      } catch (error) {
+        setGlobalStatus(error.message || "Не удалось обновить избранное.", "error");
       }
     });
 
@@ -196,9 +238,13 @@ function renderMaterialDetail(material) {
                   class="attachment-image"
                 />
                 <figcaption>${escapeHtml(attachment.caption || attachment.file_name || "Фото")}</figcaption>
-                <button class="ghost-button danger-button delete-attachment-button" type="button" data-attachment-id="${attachment.id}">
-                  Удалить фото
-                </button>
+                ${
+                  state.canEdit
+                    ? `<button class="ghost-button danger-button delete-attachment-button" type="button" data-attachment-id="${attachment.id}">
+                        Удалить фото
+                      </button>`
+                    : ""
+                }
               </figure>
             `,
           )
@@ -238,6 +284,7 @@ function startCreateMode() {
   saveMaterialButton.textContent = "Сохранить материал";
   deleteMaterialButton.classList.add("hidden");
   renderMaterialDetail(null);
+  updateEditAccessUi();
 }
 
 function startEditMode(material) {
@@ -245,7 +292,7 @@ function startEditMode(material) {
   materialFormTitle.textContent = "Редактировать материал";
   materialFormSubtitle.textContent = "Измени содержимое, теги, категорию или источник.";
   saveMaterialButton.textContent = "Сохранить изменения";
-  deleteMaterialButton.classList.remove("hidden");
+  deleteMaterialButton.classList.toggle("hidden", !state.canEdit);
 
   materialTitleInput.value = material.title || "";
   materialContentInput.value = material.content || "";
@@ -256,12 +303,18 @@ function startEditMode(material) {
   materialCategorySelect.value = material.category_id ? String(material.category_id) : "";
 
   renderMaterialDetail(material);
+  updateEditAccessUi();
   materialForm.scrollIntoView({ behavior: "smooth", block: "start" });
 }
 
 async function openMaterial(materialId) {
-  const material = await apiRequest(`/api/materials/${materialId}`);
-  startEditMode(material);
+  try {
+    clearGlobalStatus();
+    const material = await apiRequest(`/api/materials/${materialId}`);
+    startEditMode(material);
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось открыть материал.", "error");
+  }
 }
 
 async function loadCategories() {
@@ -288,22 +341,37 @@ async function loadMaterials() {
 
 async function createCategory(event) {
   event.preventDefault();
+  if (!state.canEdit) {
+    setGlobalStatus("У тебя нет прав на создание категорий через web.", "error");
+    return;
+  }
+
   const name = categoryNameInput.value.trim();
   if (!name) {
     return;
   }
 
-  await apiRequest("/api/categories", {
-    method: "POST",
-    body: JSON.stringify({ name }),
-  });
-
-  categoryForm.reset();
-  await loadCategories();
+  try {
+    clearGlobalStatus();
+    await apiRequest("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    categoryForm.reset();
+    setGlobalStatus("Категория создана.", "success");
+    await loadCategories();
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось создать категорию.", "error");
+  }
 }
 
 async function saveMaterial(event) {
   event.preventDefault();
+  if (!state.canEdit) {
+    setGlobalStatus("У тебя нет прав на редактирование через web.", "error");
+    return;
+  }
+
   const formData = new FormData(materialForm);
   const payload = {
     title: String(formData.get("title") || "").trim(),
@@ -318,49 +386,85 @@ async function saveMaterial(event) {
       .filter(Boolean),
   };
 
-  if (state.selectedMaterialId) {
-    await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    });
-  } else {
-    await apiRequest("/api/materials", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    });
+  if (!payload.title || !payload.content) {
+    setGlobalStatus("Заголовок и основной текст обязательны.", "error");
+    return;
   }
 
-  await loadMaterials();
-  await loadCategories();
+  saveMaterialButton.disabled = true;
+  saveMaterialButton.textContent = "Сохраняю...";
 
-  if (state.selectedMaterialId) {
-    await openMaterial(state.selectedMaterialId);
-  } else {
-    startCreateMode();
+  try {
+    clearGlobalStatus();
+    let result;
+    if (state.selectedMaterialId) {
+      result = await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
+        method: "PATCH",
+        body: JSON.stringify(payload),
+      });
+    } else {
+      result = await apiRequest("/api/materials", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    }
+
+    setGlobalStatus("Изменения сохранены.", "success");
+    await loadMaterials();
+    await loadCategories();
+
+    if (result?.id) {
+      await openMaterial(result.id);
+    } else if (state.selectedMaterialId) {
+      await openMaterial(state.selectedMaterialId);
+    } else {
+      startCreateMode();
+    }
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось сохранить изменения.", "error");
+  } finally {
+    saveMaterialButton.disabled = !state.canEdit;
+    saveMaterialButton.textContent = state.selectedMaterialId ? "Сохранить изменения" : "Сохранить материал";
   }
 }
 
 async function deleteSelectedMaterial() {
-  if (!state.selectedMaterialId) {
+  if (!state.selectedMaterialId || !state.canEdit) {
     return;
   }
 
-  await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
-    method: "DELETE",
-  });
-
-  await loadMaterials();
-  await loadCategories();
-  startCreateMode();
+  try {
+    clearGlobalStatus();
+    await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
+      method: "DELETE",
+    });
+    setGlobalStatus("Материал удалён.", "success");
+    await loadMaterials();
+    await loadCategories();
+    startCreateMode();
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось удалить материал.", "error");
+  }
 }
 
 async function deleteAttachment(materialId, attachmentId) {
-  await apiRequest(`/api/materials/${materialId}/attachments/${attachmentId}`, {
-    method: "DELETE",
-  });
-  await loadMaterials();
-  await loadCategories();
-  await openMaterial(materialId);
+  if (!state.canEdit) {
+    setGlobalStatus("У тебя нет прав на удаление вложений.", "error");
+    return;
+  }
+
+  try {
+    clearGlobalStatus();
+    await apiRequest(`/api/materials/${materialId}/attachments/${attachmentId}`, {
+      method: "DELETE",
+    });
+    setGlobalStatus("Фото удалено.", "success");
+    await loadMaterials();
+    await loadCategories();
+    await openMaterial(materialId);
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось удалить фото.", "error");
+  }
 }
 
 function truncateText(text, maxLength) {
@@ -395,14 +499,10 @@ async function bootstrap() {
     const requestedMaterialId = getRequestedMaterialId();
     if (requestedMaterialId) {
       await openMaterial(requestedMaterialId);
-      return;
-    }
-
-    if (getRequestedView() === "add") {
-      materialTitleInput.focus();
     }
   } catch (error) {
     authStatus.textContent = error.message || "Не удалось загрузить данные.";
+    setGlobalStatus(error.message || "Не удалось загрузить кабинет.", "error");
   }
 }
 
@@ -411,6 +511,7 @@ materialForm.addEventListener("submit", saveMaterial);
 deleteMaterialButton.addEventListener("click", deleteSelectedMaterial);
 resetMaterialButton.addEventListener("click", startCreateMode);
 refreshButton.addEventListener("click", async () => {
+  clearGlobalStatus();
   await loadCategories();
   await loadMaterials();
   if (state.selectedMaterialId) {

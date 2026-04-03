@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.api.dependencies import get_current_user
+from app.backend.api.dependencies import can_edit_web, get_current_user
 from app.backend.db import crud
 from app.backend.db.database import get_session
 from app.backend.db.models import User
@@ -29,6 +29,7 @@ async def auth_via_telegram(
         "id": user.id,
         "telegram_id": user.telegram_id,
         "username": user.username,
+        "can_edit": can_edit_web(user),
     }
 
 
@@ -38,4 +39,5 @@ async def auth_me(user: User = Depends(get_current_user)) -> dict:
         "id": user.id,
         "telegram_id": user.telegram_id,
         "username": user.username,
+        "can_edit": can_edit_web(user),
     }

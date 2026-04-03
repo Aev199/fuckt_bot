@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -19,6 +19,7 @@ class Settings(BaseSettings):
     log_level: str = Field(default="INFO", alias="LOG_LEVEL")
     mini_app_url: str = Field(default="http://127.0.0.1:8000/app", alias="MINI_APP_URL")
     web_cabinet_token: str | None = Field(default=None, alias="WEB_CABINET_TOKEN")
+    web_editor_telegram_ids: list[int] = Field(default_factory=list, alias="WEB_EDITOR_TELEGRAM_IDS")
     backend_host: str = Field(default="127.0.0.1", alias="BACKEND_HOST")
     backend_port: int = Field(default=8000, alias="BACKEND_PORT")
     backend_cors_origins: list[str] = Field(default=["*"], alias="BACKEND_CORS_ORIGINS")
@@ -28,6 +29,15 @@ class Settings(BaseSettings):
     review_interval_didnt_days: int = Field(default=1, alias="REVIEW_INTERVAL_DIDNT_DAYS")
     scheduler_timezone: str = Field(default="UTC", alias="SCHEDULER_TIMEZONE")
     cards_json_path: str = Field(default="data/cards.json", alias="CARDS_JSON_PATH")
+
+    @field_validator("web_editor_telegram_ids", mode="before")
+    @classmethod
+    def parse_web_editor_ids(cls, value):
+        if value in (None, "", []):
+            return []
+        if isinstance(value, str):
+            return [int(item.strip()) for item in value.split(",") if item.strip()]
+        return value
 
 
 @lru_cache(maxsize=1)

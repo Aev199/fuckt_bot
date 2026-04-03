@@ -56,3 +56,13 @@ async def get_current_user_for_media(
         )
 
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing valid media auth")
+
+
+def can_edit_web(user: User) -> bool:
+    return user.telegram_id in settings.web_editor_telegram_ids
+
+
+async def require_web_editor(user: User = Depends(get_current_user)) -> User:
+    if not can_edit_web(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Editing is not allowed for this user")
+    return user

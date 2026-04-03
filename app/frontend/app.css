@@ -68,6 +68,35 @@ body {
   max-width: 700px;
 }
 
+.secondary-status {
+  margin-top: 8px;
+}
+
+.status-banner {
+  margin-top: 12px;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid var(--line);
+  background: rgba(255, 255, 255, 0.82);
+}
+
+.status-banner.success {
+  color: #235a1f;
+  background: rgba(80, 173, 82, 0.12);
+  border-color: rgba(80, 173, 82, 0.24);
+}
+
+.status-banner.error {
+  color: var(--danger);
+  background: rgba(156, 45, 34, 0.12);
+  border-color: rgba(156, 45, 34, 0.24);
+}
+
+.status-banner.info {
+  color: var(--accent-strong);
+  background: rgba(143, 83, 21, 0.08);
+}
+
 .grid {
   display: grid;
   grid-template-columns: 0.9fr 1.1fr;

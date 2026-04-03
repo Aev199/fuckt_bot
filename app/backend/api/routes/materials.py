@@ -3,7 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.backend.api.dependencies import get_current_user, get_current_user_for_media
+from app.backend.api.dependencies import get_current_user, get_current_user_for_media, require_web_editor
 from app.backend.db import crud
 from app.backend.db.database import get_session
 from app.backend.db.models import User
@@ -40,7 +40,7 @@ async def get_materials(
 @router.post("")
 async def post_material(
     payload: MaterialCreate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_web_editor),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
@@ -67,7 +67,7 @@ async def get_material_by_id(
 async def patch_material(
     material_id: int,
     payload: MaterialUpdate,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_web_editor),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
@@ -80,7 +80,7 @@ async def patch_material(
 @router.delete("/{material_id}", response_model=MessageResponse)
 async def delete_material(
     material_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_web_editor),
     session: AsyncSession = Depends(get_session),
 ) -> MessageResponse:
     try:
@@ -93,7 +93,7 @@ async def delete_material(
 @router.post("/{material_id}/favorite")
 async def toggle_favorite(
     material_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_web_editor),
     session: AsyncSession = Depends(get_session),
 ) -> dict:
     try:
@@ -135,7 +135,7 @@ async def get_attachment_content(
 async def delete_attachment(
     material_id: int,
     attachment_id: int,
-    user: User = Depends(get_current_user),
+    user: User = Depends(require_web_editor),
     session: AsyncSession = Depends(get_session),
 ) -> MessageResponse:
     try:
