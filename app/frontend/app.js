@@ -2,39 +2,59 @@ const tg = window.Telegram?.WebApp;
 const state = {
   initData: "",
   cabinetToken: "",
-  categories: [],
-  materials: [],
-  selectedMaterialId: null,
   currentUser: null,
   canEdit: false,
+  categoryTree: [],
+  materials: [],
+  selectedMaterial: null,
+  selectedTopCategoryId: null,
+  selectedCategoryId: null,
+  activeQuickFilter: "all",
+  detailMode: "view",
 };
 
 const authStatus = document.getElementById("authStatus");
 const accessStatus = document.getElementById("accessStatus");
 const globalStatus = document.getElementById("globalStatus");
 const refreshButton = document.getElementById("refreshButton");
-const categoryForm = document.getElementById("categoryForm");
-const categoryNameInput = document.getElementById("categoryName");
-const categoriesList = document.getElementById("categoriesList");
-const materialForm = document.getElementById("materialForm");
-const materialFormTitle = document.getElementById("materialFormTitle");
-const materialFormSubtitle = document.getElementById("materialFormSubtitle");
+const categoryTree = document.getElementById("categoryTree");
+const rootCategoryForm = document.getElementById("rootCategoryForm");
+const rootCategoryName = document.getElementById("rootCategoryName");
+const subcategoryForm = document.getElementById("subcategoryForm");
+const subcategoryParent = document.getElementById("subcategoryParent");
+const subcategoryName = document.getElementById("subcategoryName");
+const listContext = document.getElementById("listContext");
+const newMaterialButton = document.getElementById("newMaterialButton");
+const searchInput = document.getElementById("searchInput");
+const quickFilterButtons = [...document.querySelectorAll(".quick-filter")];
+const materialsList = document.getElementById("materialsList");
+const materialTemplate = document.getElementById("materialTemplate");
+const detailEmpty = document.getElementById("detailEmpty");
+const detailContent = document.getElementById("detailContent");
+const detailTitle = document.getElementById("detailTitle");
+const detailMeta = document.getElementById("detailMeta");
+const detailSource = document.getElementById("detailSource");
+const detailBody = document.getElementById("detailBody");
+const detailNotesSection = document.getElementById("detailNotesSection");
+const detailNotes = document.getElementById("detailNotes");
+const detailTags = document.getElementById("detailTags");
+const detailAttachmentsSection = document.getElementById("detailAttachmentsSection");
+const detailAttachments = document.getElementById("detailAttachments");
+const detailFavoriteButton = document.getElementById("detailFavoriteButton");
+const editMaterialButton = document.getElementById("editMaterialButton");
+const materialEditor = document.getElementById("materialEditor");
+const editorTitle = document.getElementById("editorTitle");
 const materialTitleInput = document.getElementById("materialTitle");
 const materialContentInput = document.getElementById("materialContent");
 const materialSourceUrlInput = document.getElementById("materialSourceUrl");
 const materialSourceNameInput = document.getElementById("materialSourceName");
 const materialNotesInput = document.getElementById("materialNotes");
 const materialTagsInput = document.getElementById("materialTags");
-const materialCategorySelect = document.getElementById("materialCategory");
+const materialTopCategorySelect = document.getElementById("materialTopCategory");
+const materialSubcategorySelect = document.getElementById("materialSubcategory");
 const saveMaterialButton = document.getElementById("saveMaterialButton");
+const cancelEditButton = document.getElementById("cancelEditButton");
 const deleteMaterialButton = document.getElementById("deleteMaterialButton");
-const resetMaterialButton = document.getElementById("resetMaterialButton");
-const materialDetail = document.getElementById("materialDetail");
-const searchCategorySelect = document.getElementById("searchCategory");
-const materialsList = document.getElementById("materialsList");
-const searchInput = document.getElementById("searchInput");
-const favoriteOnlyCheckbox = document.getElementById("favoriteOnly");
-const materialTemplate = document.getElementById("materialTemplate");
 
 function getInitData() {
   if (tg?.initData) {
@@ -78,24 +98,31 @@ function clearGlobalStatus() {
   globalStatus.className = "status-banner hidden";
 }
 
-function updateEditAccessUi() {
-  const formControls = materialForm.querySelectorAll("input, textarea, select, button");
-  const categoryControls = categoryForm.querySelectorAll("input, button");
+function getRootCategories() {
+  return state.categoryTree;
+}
 
-  for (const element of formControls) {
-    element.disabled = !state.canEdit;
+function getCurrentMaterialCategoryId() {
+  return Number(materialSubcategorySelect.value || materialTopCategorySelect.value || "") || null;
+}
+
+function setQuickFilter(filter) {
+  state.activeQuickFilter = filter;
+  for (const button of quickFilterButtons) {
+    button.classList.toggle("is-active", button.dataset.filter === filter);
   }
-  for (const element of categoryControls) {
-    element.disabled = !state.canEdit;
-  }
+}
 
-  saveMaterialButton.classList.toggle("hidden", !state.canEdit);
-  deleteMaterialButton.classList.toggle("hidden", !state.canEdit || !state.selectedMaterialId);
-  resetMaterialButton.disabled = !state.canEdit;
-
+function updateAccessUi() {
   accessStatus.textContent = state.canEdit
     ? "У тебя есть права редактирования через web."
-    : "Режим только для чтения: смотреть можно, изменять через web нельзя.";
+    : "Режим только для чтения: кабинет работает как справочник.";
+
+  rootCategoryForm.classList.toggle("hidden", !state.canEdit);
+  subcategoryForm.classList.toggle("hidden", !state.canEdit);
+  newMaterialButton.classList.toggle("hidden", !state.canEdit);
+  detailFavoriteButton.classList.toggle("hidden", !state.canEdit);
+  editMaterialButton.classList.toggle("hidden", !state.canEdit);
 }
 
 async function apiRequest(path, options = {}) {
@@ -126,82 +153,188 @@ async function authenticate() {
     return;
   }
 
-  let user;
-  if (state.initData) {
-    user = await apiRequest("/api/auth/telegram", {
-      method: "POST",
-      body: JSON.stringify({ init_data: state.initData }),
-    });
-  } else {
-    user = await apiRequest("/api/auth/me");
-  }
+  const user = state.initData
+    ? await apiRequest("/api/auth/telegram", {
+        method: "POST",
+        body: JSON.stringify({ init_data: state.initData }),
+      })
+    : await apiRequest("/api/auth/me");
 
   state.currentUser = user;
   state.canEdit = Boolean(user.can_edit);
   authStatus.textContent = `Подключено: @${user.username || "user"} (telegram_id: ${user.telegram_id})`;
-  updateEditAccessUi();
+  updateAccessUi();
 }
 
-function renderCategories() {
-  categoriesList.innerHTML = "";
-  materialCategorySelect.innerHTML = '<option value="">Без категории</option>';
-  searchCategorySelect.innerHTML = '<option value="">Все категории</option>';
+async function loadCategoryTree() {
+  state.categoryTree = await apiRequest("/api/categories/tree");
+  renderCategoryTree();
+  populateCategoryEditors();
+}
 
-  if (!state.categories.length) {
-    categoriesList.innerHTML = '<div class="empty">Категорий пока нет.</div>';
+async function loadMaterials() {
+  const query = new URLSearchParams();
+
+  if (searchInput.value.trim()) {
+    query.set("q", searchInput.value.trim());
+  }
+  if (state.selectedCategoryId) {
+    query.set("category_id", String(state.selectedCategoryId));
+  } else if (state.selectedTopCategoryId) {
+    query.set("top_category_id", String(state.selectedTopCategoryId));
+  }
+  if (state.activeQuickFilter === "favorites") {
+    query.set("favorite", "true");
+  }
+  if (state.activeQuickFilter === "with-photos") {
+    query.set("has_attachments", "true");
+  }
+
+  const payload = await apiRequest(`/api/materials?${query.toString()}`);
+  state.materials = payload.items;
+  renderMaterials();
+}
+
+function renderCategoryTree() {
+  categoryTree.innerHTML = "";
+
+  const allButton = document.createElement("button");
+  allButton.type = "button";
+  allButton.className = `tree-button ${!state.selectedTopCategoryId && !state.selectedCategoryId ? "is-active" : ""}`;
+  allButton.textContent = "Все материалы";
+  allButton.addEventListener("click", async () => {
+    state.selectedTopCategoryId = null;
+    state.selectedCategoryId = null;
+    updateListContext();
+    await loadMaterials();
+    renderCategoryTree();
+  });
+  categoryTree.appendChild(allButton);
+
+  for (const root of getRootCategories()) {
+    const section = document.createElement("div");
+    section.className = "tree-section";
+
+    const rootButton = document.createElement("button");
+    rootButton.type = "button";
+    rootButton.className = `tree-button ${state.selectedTopCategoryId === root.id && !state.selectedCategoryId ? "is-active" : ""}`;
+    rootButton.textContent = `${root.name} (${root.materials_count})`;
+    rootButton.addEventListener("click", async () => {
+      state.selectedTopCategoryId = root.id;
+      state.selectedCategoryId = null;
+      updateListContext();
+      await loadMaterials();
+      renderCategoryTree();
+    });
+    section.appendChild(rootButton);
+
+    if (root.children?.length) {
+      const childList = document.createElement("div");
+      childList.className = "tree-children";
+
+      for (const child of root.children) {
+        const childButton = document.createElement("button");
+        childButton.type = "button";
+        childButton.className = `tree-button tree-child ${state.selectedCategoryId === child.id ? "is-active" : ""}`;
+        childButton.textContent = `${child.name} (${child.materials_count})`;
+        childButton.addEventListener("click", async () => {
+          state.selectedTopCategoryId = root.id;
+          state.selectedCategoryId = child.id;
+          updateListContext();
+          await loadMaterials();
+          renderCategoryTree();
+        });
+        childList.appendChild(childButton);
+      }
+
+      section.appendChild(childList);
+    }
+
+    categoryTree.appendChild(section);
+  }
+}
+
+function populateCategoryEditors() {
+  subcategoryParent.innerHTML = '<option value="">Выбери категорию</option>';
+  materialTopCategorySelect.innerHTML = '<option value="">Без категории</option>';
+  materialSubcategorySelect.innerHTML = '<option value="">Без подкатегории</option>';
+
+  for (const root of getRootCategories()) {
+    const rootOptionForSub = document.createElement("option");
+    rootOptionForSub.value = String(root.id);
+    rootOptionForSub.textContent = root.name;
+    subcategoryParent.appendChild(rootOptionForSub);
+
+    const rootOptionForMaterial = document.createElement("option");
+    rootOptionForMaterial.value = String(root.id);
+    rootOptionForMaterial.textContent = root.name;
+    materialTopCategorySelect.appendChild(rootOptionForMaterial);
+  }
+}
+
+function populateSubcategoryOptions(topCategoryId, selectedCategoryId = null) {
+  materialSubcategorySelect.innerHTML = '<option value="">Без подкатегории</option>';
+  const root = getRootCategories().find((item) => item.id === topCategoryId);
+  if (!root) {
     return;
   }
 
-  for (const category of state.categories) {
-    const item = document.createElement("div");
-    item.className = "category-item";
-    item.innerHTML = `<strong>${escapeHtml(category.name)}</strong><span>${category.materials_count} материалов</span>`;
-    categoriesList.appendChild(item);
-
-    const materialOption = document.createElement("option");
-    materialOption.value = String(category.id);
-    materialOption.textContent = category.name;
-    materialCategorySelect.appendChild(materialOption);
-
-    const searchOption = document.createElement("option");
-    searchOption.value = String(category.id);
-    searchOption.textContent = category.name;
-    searchCategorySelect.appendChild(searchOption);
+  for (const child of root.children || []) {
+    const option = document.createElement("option");
+    option.value = String(child.id);
+    option.textContent = child.name;
+    option.selected = selectedCategoryId === child.id;
+    materialSubcategorySelect.appendChild(option);
   }
+}
+
+function updateListContext() {
+  const root = getRootCategories().find((item) => item.id === state.selectedTopCategoryId);
+  const child = root?.children?.find((item) => item.id === state.selectedCategoryId);
+
+  if (child) {
+    listContext.textContent = `${root.name} → ${child.name}`;
+    return;
+  }
+  if (root) {
+    listContext.textContent = root.name;
+    return;
+  }
+  listContext.textContent = "Все материалы";
 }
 
 function renderMaterials() {
   materialsList.innerHTML = "";
 
   if (!state.materials.length) {
-    materialsList.innerHTML = '<div class="empty">Материалов пока нет.</div>';
+    materialsList.innerHTML = '<div class="empty">По текущему фильтру ничего не найдено.</div>';
     return;
   }
 
   for (const material of state.materials) {
     const node = materialTemplate.content.firstElementChild.cloneNode(true);
     node.querySelector(".material-title").textContent = material.title;
-    node.querySelector(".material-meta").textContent =
-      `${material.category_name || "Без категории"}${material.source_name ? ` • ${material.source_name}` : ""}`;
-    node.querySelector(".material-content").textContent = truncateText(material.content, 180);
-    node.querySelector(".material-tags").textContent =
-      material.tags.length ? `Теги: ${material.tags.join(", ")}` : "Теги не указаны";
+    node.querySelector(".material-meta").textContent = buildMaterialMeta(material);
+    node.querySelector(".material-content").textContent = truncateText(material.content, 160);
 
-    if (material.attachments?.length) {
-      node.querySelector(".material-tags").textContent += ` • Фото: ${material.attachments.length}`;
+    const tagLine = [];
+    if (material.tags.length) {
+      tagLine.push(`Теги: ${material.tags.join(", ")}`);
     }
+    if (material.attachments.length) {
+      tagLine.push(`Фото: ${material.attachments.length}`);
+    }
+    node.querySelector(".material-tags").textContent = tagLine.join(" • ") || "Без тегов и фото";
 
     const favoriteButton = node.querySelector(".favorite-button");
     favoriteButton.textContent = material.is_favorite ? "★" : "☆";
-    favoriteButton.disabled = !state.canEdit;
     favoriteButton.classList.toggle("hidden", !state.canEdit);
     favoriteButton.addEventListener("click", async () => {
       try {
-        clearGlobalStatus();
         await apiRequest(`/api/materials/${material.id}/favorite`, { method: "POST" });
         setGlobalStatus("Избранное обновлено.", "success");
         await loadMaterials();
-        if (state.selectedMaterialId === material.id) {
+        if (state.selectedMaterial?.id === material.id) {
           await openMaterial(material.id);
         }
       } catch (error) {
@@ -217,152 +350,141 @@ function renderMaterials() {
   }
 }
 
-function renderMaterialDetail(material) {
-  if (!material) {
-    materialDetail.innerHTML = "Выбери материал из списка, чтобы посмотреть детали.";
-    materialDetail.className = "detail-empty";
-    return;
-  }
-
-  const attachmentsHtml = (material.attachments || []).length
-    ? `
-      <div class="detail-label">Вложения</div>
-      <div class="attachment-grid">
-        ${material.attachments
-          .map(
-            (attachment) => `
-              <figure class="attachment-card" data-attachment-id="${attachment.id}">
-                <img
-                  src="${escapeAttribute(getAttachmentUrl(material.id, attachment.id))}"
-                  alt="${escapeAttribute(attachment.caption || material.title)}"
-                  class="attachment-image"
-                />
-                <figcaption>${escapeHtml(attachment.caption || attachment.file_name || "Фото")}</figcaption>
-                ${
-                  state.canEdit
-                    ? `<button class="ghost-button danger-button delete-attachment-button" type="button" data-attachment-id="${attachment.id}">
-                        Удалить фото
-                      </button>`
-                    : ""
-                }
-              </figure>
-            `,
-          )
-          .join("")}
-      </div>
-    `
-    : "";
-
-  materialDetail.className = "detail-card";
-  materialDetail.innerHTML = `
-    <div class="detail-label">Заголовок</div>
-    <h3>${escapeHtml(material.title)}</h3>
-    <div class="detail-label">Категория и источник</div>
-    <p class="material-meta">${escapeHtml(material.category_name || "Без категории")}${material.source_name ? ` • ${escapeHtml(material.source_name)}` : ""}</p>
-    ${material.source_url ? `<p><a href="${escapeAttribute(material.source_url)}" target="_blank" rel="noreferrer">Открыть источник</a></p>` : ""}
-    <div class="detail-label">Содержимое</div>
-    <p class="detail-content">${escapeHtml(material.content)}</p>
-    ${material.notes ? `<div class="detail-label">Заметки</div><p class="detail-notes">${escapeHtml(material.notes)}</p>` : ""}
-    <div class="detail-label">Теги</div>
-    <p class="material-tags">${material.tags.length ? escapeHtml(material.tags.join(", ")) : "Теги не указаны"}</p>
-    ${attachmentsHtml}
-  `;
-
-  for (const button of materialDetail.querySelectorAll(".delete-attachment-button")) {
-    button.addEventListener("click", async () => {
-      const attachmentId = Number(button.dataset.attachmentId);
-      await deleteAttachment(material.id, attachmentId);
-    });
-  }
-}
-
-function startCreateMode() {
-  state.selectedMaterialId = null;
-  materialForm.reset();
-  materialFormTitle.textContent = "Добавить материал";
-  materialFormSubtitle.textContent = "Сохрани заметку, статью или выдержку.";
-  saveMaterialButton.textContent = "Сохранить материал";
-  deleteMaterialButton.classList.add("hidden");
-  renderMaterialDetail(null);
-  updateEditAccessUi();
-}
-
-function startEditMode(material) {
-  state.selectedMaterialId = material.id;
-  materialFormTitle.textContent = "Редактировать материал";
-  materialFormSubtitle.textContent = "Измени содержимое, теги, категорию или источник.";
-  saveMaterialButton.textContent = "Сохранить изменения";
-  deleteMaterialButton.classList.toggle("hidden", !state.canEdit);
-
-  materialTitleInput.value = material.title || "";
-  materialContentInput.value = material.content || "";
-  materialSourceUrlInput.value = material.source_url || "";
-  materialSourceNameInput.value = material.source_name || "";
-  materialNotesInput.value = material.notes || "";
-  materialTagsInput.value = material.tags.join(", ");
-  materialCategorySelect.value = material.category_id ? String(material.category_id) : "";
-
-  renderMaterialDetail(material);
-  updateEditAccessUi();
-  materialForm.scrollIntoView({ behavior: "smooth", block: "start" });
-}
-
 async function openMaterial(materialId) {
   try {
     clearGlobalStatus();
-    const material = await apiRequest(`/api/materials/${materialId}`);
-    startEditMode(material);
+    state.selectedMaterial = await apiRequest(`/api/materials/${materialId}`);
+    state.detailMode = "view";
+    renderDetailPane();
   } catch (error) {
     setGlobalStatus(error.message || "Не удалось открыть материал.", "error");
   }
 }
 
-async function loadCategories() {
-  state.categories = await apiRequest("/api/categories");
-  renderCategories();
+function renderDetailPane() {
+  const material = state.selectedMaterial;
+  const showView = Boolean(material) && state.detailMode === "view";
+  const showEditor = state.detailMode === "edit" && state.canEdit;
+
+  detailEmpty.classList.toggle("hidden", Boolean(material));
+  detailContent.classList.toggle("hidden", !showView);
+  materialEditor.classList.toggle("hidden", !showEditor);
+
+  if (!material) {
+    detailEmpty.textContent = "Выбери материал из списка, чтобы посмотреть детали.";
+    return;
+  }
+
+  if (showView) {
+    detailTitle.textContent = material.title;
+    detailMeta.textContent = buildMaterialMeta(material);
+    detailSource.innerHTML = material.source_url
+      ? `<a href="${escapeAttribute(material.source_url)}" target="_blank" rel="noreferrer">${escapeHtml(material.source_name || material.source_url)}</a>`
+      : escapeHtml(material.source_name || "Источник не указан");
+    detailBody.textContent = material.content;
+    detailTags.textContent = material.tags.length ? material.tags.join(", ") : "Теги не указаны";
+
+    detailNotesSection.classList.toggle("hidden", !material.notes);
+    detailNotes.textContent = material.notes || "";
+
+    detailAttachmentsSection.classList.toggle("hidden", !material.attachments.length);
+    detailAttachments.innerHTML = material.attachments
+      .map(
+        (attachment) => `
+          <figure class="attachment-card">
+            <img
+              src="${escapeAttribute(getAttachmentUrl(material.id, attachment.id))}"
+              alt="${escapeAttribute(attachment.caption || material.title)}"
+              class="attachment-image"
+            />
+            <figcaption>${escapeHtml(attachment.caption || attachment.file_name || "Фото")}</figcaption>
+            ${
+              state.canEdit
+                ? `<button class="ghost-button danger-button delete-attachment-button" type="button" data-attachment-id="${attachment.id}">Удалить фото</button>`
+                : ""
+            }
+          </figure>
+        `,
+      )
+      .join("");
+
+    for (const button of detailAttachments.querySelectorAll(".delete-attachment-button")) {
+      button.addEventListener("click", async () => {
+        const attachmentId = Number(button.dataset.attachmentId);
+        await deleteAttachment(material.id, attachmentId);
+      });
+    }
+
+    detailFavoriteButton.textContent = material.is_favorite ? "Убрать из избранного" : "В избранное";
+    detailFavoriteButton.classList.toggle("hidden", !state.canEdit);
+    editMaterialButton.classList.toggle("hidden", !state.canEdit);
+  }
+
+  if (showEditor) {
+    fillEditorForm(material);
+  }
 }
 
-async function loadMaterials() {
-  const query = new URLSearchParams();
-  if (searchInput.value.trim()) {
-    query.set("q", searchInput.value.trim());
-  }
-  if (searchCategorySelect.value) {
-    query.set("category_id", searchCategorySelect.value);
-  }
-  if (favoriteOnlyCheckbox.checked) {
-    query.set("favorite", "true");
+function fillEditorForm(material) {
+  editorTitle.textContent = material?.id ? "Редактирование материала" : "Новый материал";
+  materialTitleInput.value = material?.title || "";
+  materialContentInput.value = material?.content || "";
+  materialSourceUrlInput.value = material?.source_url || "";
+  materialSourceNameInput.value = material?.source_name || "";
+  materialNotesInput.value = material?.notes || "";
+  materialTagsInput.value = material?.tags?.join(", ") || "";
+
+  materialTopCategorySelect.value = material?.top_category_id ? String(material.top_category_id) : "";
+  populateSubcategoryOptions(material?.top_category_id || null, material?.subcategory_id || null);
+  if (!material?.subcategory_id) {
+    materialSubcategorySelect.value = "";
   }
 
-  const payload = await apiRequest(`/api/materials?${query.toString()}`);
-  state.materials = payload.items;
-  renderMaterials();
+  deleteMaterialButton.classList.toggle("hidden", !material?.id);
 }
 
-async function createCategory(event) {
-  event.preventDefault();
+function buildMaterialMeta(material) {
+  const parts = [];
+  if (material.top_category_name && material.subcategory_name) {
+    parts.push(`${material.top_category_name} → ${material.subcategory_name}`);
+  } else if (material.top_category_name) {
+    parts.push(material.top_category_name);
+  } else if (material.category_name) {
+    parts.push(material.category_name);
+  } else {
+    parts.push("Без категории");
+  }
+  if (material.source_name) {
+    parts.push(material.source_name);
+  }
+  parts.push(new Date(material.updated_at).toLocaleDateString("ru-RU"));
+  return parts.join(" • ");
+}
+
+function beginCreateMaterial() {
   if (!state.canEdit) {
-    setGlobalStatus("У тебя нет прав на создание категорий через web.", "error");
+    setGlobalStatus("У тебя нет прав на создание материалов через web.", "error");
     return;
   }
+  state.selectedMaterial = null;
+  state.detailMode = "edit";
+  detailEmpty.classList.add("hidden");
+  detailContent.classList.add("hidden");
+  materialEditor.classList.remove("hidden");
+  fillEditorForm(null);
+}
 
-  const name = categoryNameInput.value.trim();
-  if (!name) {
+function beginEditMaterial() {
+  if (!state.selectedMaterial || !state.canEdit) {
     return;
   }
+  state.detailMode = "edit";
+  renderDetailPane();
+}
 
-  try {
-    clearGlobalStatus();
-    await apiRequest("/api/categories", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    });
-    categoryForm.reset();
-    setGlobalStatus("Категория создана.", "success");
-    await loadCategories();
-  } catch (error) {
-    setGlobalStatus(error.message || "Не удалось создать категорию.", "error");
-  }
+function cancelEdit() {
+  state.detailMode = "view";
+  renderDetailPane();
 }
 
 async function saveMaterial(event) {
@@ -372,15 +494,14 @@ async function saveMaterial(event) {
     return;
   }
 
-  const formData = new FormData(materialForm);
   const payload = {
-    title: String(formData.get("title") || "").trim(),
-    content: String(formData.get("content") || "").trim(),
-    source_url: String(formData.get("source_url") || "").trim() || null,
-    source_name: String(formData.get("source_name") || "").trim() || null,
-    notes: String(formData.get("notes") || "").trim() || null,
-    category_id: formData.get("category_id") ? Number(formData.get("category_id")) : null,
-    tags: String(formData.get("tags") || "")
+    title: materialTitleInput.value.trim(),
+    content: materialContentInput.value.trim(),
+    source_url: materialSourceUrlInput.value.trim() || null,
+    source_name: materialSourceNameInput.value.trim() || null,
+    notes: materialNotesInput.value.trim() || null,
+    category_id: getCurrentMaterialCategoryId(),
+    tags: materialTagsInput.value
       .split(",")
       .map((item) => item.trim())
       .filter(Boolean),
@@ -393,55 +514,43 @@ async function saveMaterial(event) {
 
   saveMaterialButton.disabled = true;
   saveMaterialButton.textContent = "Сохраняю...";
-
   try {
-    clearGlobalStatus();
-    let result;
-    if (state.selectedMaterialId) {
-      result = await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
+    let material;
+    if (state.selectedMaterial?.id) {
+      material = await apiRequest(`/api/materials/${state.selectedMaterial.id}`, {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
     } else {
-      result = await apiRequest("/api/materials", {
+      material = await apiRequest("/api/materials", {
         method: "POST",
         body: JSON.stringify(payload),
       });
     }
-
     setGlobalStatus("Изменения сохранены.", "success");
     await loadMaterials();
-    await loadCategories();
-
-    if (result?.id) {
-      await openMaterial(result.id);
-    } else if (state.selectedMaterialId) {
-      await openMaterial(state.selectedMaterialId);
-    } else {
-      startCreateMode();
-    }
+    state.selectedMaterial = material;
+    state.detailMode = "view";
+    renderDetailPane();
   } catch (error) {
-    setGlobalStatus(error.message || "Не удалось сохранить изменения.", "error");
+    setGlobalStatus(error.message || "Не удалось сохранить материал.", "error");
   } finally {
-    saveMaterialButton.disabled = !state.canEdit;
-    saveMaterialButton.textContent = state.selectedMaterialId ? "Сохранить изменения" : "Сохранить материал";
+    saveMaterialButton.disabled = false;
+    saveMaterialButton.textContent = "Сохранить";
   }
 }
 
 async function deleteSelectedMaterial() {
-  if (!state.selectedMaterialId || !state.canEdit) {
+  if (!state.selectedMaterial?.id || !state.canEdit) {
     return;
   }
-
   try {
-    clearGlobalStatus();
-    await apiRequest(`/api/materials/${state.selectedMaterialId}`, {
-      method: "DELETE",
-    });
+    await apiRequest(`/api/materials/${state.selectedMaterial.id}`, { method: "DELETE" });
     setGlobalStatus("Материал удалён.", "success");
+    state.selectedMaterial = null;
+    state.detailMode = "view";
+    renderDetailPane();
     await loadMaterials();
-    await loadCategories();
-    startCreateMode();
   } catch (error) {
     setGlobalStatus(error.message || "Не удалось удалить материал.", "error");
   }
@@ -449,21 +558,63 @@ async function deleteSelectedMaterial() {
 
 async function deleteAttachment(materialId, attachmentId) {
   if (!state.canEdit) {
-    setGlobalStatus("У тебя нет прав на удаление вложений.", "error");
     return;
   }
-
   try {
-    clearGlobalStatus();
-    await apiRequest(`/api/materials/${materialId}/attachments/${attachmentId}`, {
-      method: "DELETE",
-    });
+    await apiRequest(`/api/materials/${materialId}/attachments/${attachmentId}`, { method: "DELETE" });
     setGlobalStatus("Фото удалено.", "success");
-    await loadMaterials();
-    await loadCategories();
     await openMaterial(materialId);
+    await loadMaterials();
   } catch (error) {
     setGlobalStatus(error.message || "Не удалось удалить фото.", "error");
+  }
+}
+
+async function createRootCategory(event) {
+  event.preventDefault();
+  if (!state.canEdit) {
+    return;
+  }
+  const name = rootCategoryName.value.trim();
+  if (!name) {
+    return;
+  }
+  try {
+    await apiRequest("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name }),
+    });
+    rootCategoryName.value = "";
+    setGlobalStatus("Категория создана.", "success");
+    await loadCategoryTree();
+    await loadMaterials();
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось создать категорию.", "error");
+  }
+}
+
+async function createSubcategory(event) {
+  event.preventDefault();
+  if (!state.canEdit) {
+    return;
+  }
+  const parentId = Number(subcategoryParent.value || "");
+  const name = subcategoryName.value.trim();
+  if (!parentId || !name) {
+    setGlobalStatus("Выбери категорию и укажи имя подкатегории.", "error");
+    return;
+  }
+  try {
+    await apiRequest("/api/categories", {
+      method: "POST",
+      body: JSON.stringify({ name, parent_id: parentId }),
+    });
+    subcategoryName.value = "";
+    setGlobalStatus("Подкатегория создана.", "success");
+    await loadCategoryTree();
+    await loadMaterials();
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось создать подкатегорию.", "error");
   }
 }
 
@@ -475,7 +626,7 @@ function truncateText(text, maxLength) {
 }
 
 function escapeHtml(value) {
-  return value
+  return String(value)
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;")
@@ -492,34 +643,62 @@ async function bootstrap() {
     tg?.ready();
     tg?.expand();
     await authenticate();
-    await loadCategories();
+    await loadCategoryTree();
+    updateListContext();
     await loadMaterials();
-    startCreateMode();
 
     const requestedMaterialId = getRequestedMaterialId();
     if (requestedMaterialId) {
       await openMaterial(requestedMaterialId);
+    } else {
+      renderDetailPane();
     }
   } catch (error) {
     authStatus.textContent = error.message || "Не удалось загрузить данные.";
-    setGlobalStatus(error.message || "Не удалось загрузить кабинет.", "error");
+    setGlobalStatus(error.message || "Не удалось открыть кабинет.", "error");
   }
 }
 
-categoryForm.addEventListener("submit", createCategory);
-materialForm.addEventListener("submit", saveMaterial);
-deleteMaterialButton.addEventListener("click", deleteSelectedMaterial);
-resetMaterialButton.addEventListener("click", startCreateMode);
 refreshButton.addEventListener("click", async () => {
   clearGlobalStatus();
-  await loadCategories();
+  await loadCategoryTree();
+  updateListContext();
   await loadMaterials();
-  if (state.selectedMaterialId) {
-    await openMaterial(state.selectedMaterialId);
+  if (state.selectedMaterial?.id) {
+    await openMaterial(state.selectedMaterial.id);
   }
 });
+rootCategoryForm.addEventListener("submit", createRootCategory);
+subcategoryForm.addEventListener("submit", createSubcategory);
+newMaterialButton.addEventListener("click", beginCreateMaterial);
+editMaterialButton.addEventListener("click", beginEditMaterial);
+cancelEditButton.addEventListener("click", cancelEdit);
+materialEditor.addEventListener("submit", saveMaterial);
+deleteMaterialButton.addEventListener("click", deleteSelectedMaterial);
+materialTopCategorySelect.addEventListener("change", () => {
+  const topId = Number(materialTopCategorySelect.value || "") || null;
+  populateSubcategoryOptions(topId, null);
+});
 searchInput.addEventListener("input", loadMaterials);
-searchCategorySelect.addEventListener("change", loadMaterials);
-favoriteOnlyCheckbox.addEventListener("change", loadMaterials);
+detailFavoriteButton.addEventListener("click", async () => {
+  if (!state.selectedMaterial?.id || !state.canEdit) {
+    return;
+  }
+  try {
+    const material = await apiRequest(`/api/materials/${state.selectedMaterial.id}/favorite`, { method: "POST" });
+    state.selectedMaterial = material;
+    setGlobalStatus("Избранное обновлено.", "success");
+    renderDetailPane();
+    await loadMaterials();
+  } catch (error) {
+    setGlobalStatus(error.message || "Не удалось обновить избранное.", "error");
+  }
+});
+for (const button of quickFilterButtons) {
+  button.addEventListener("click", async () => {
+    setQuickFilter(button.dataset.filter);
+    await loadMaterials();
+  });
+}
 
 bootstrap();

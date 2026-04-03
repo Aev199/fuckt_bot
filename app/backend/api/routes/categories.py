@@ -21,6 +21,15 @@ async def get_categories(
     return await crud.list_categories(session=session, user_id=user.id)
 
 
+@router.get("/tree")
+async def get_category_tree(
+    user: User = Depends(get_current_user),
+    session: AsyncSession = Depends(get_session),
+) -> list[dict]:
+    tree = await crud.list_category_tree(session=session, user_id=user.id)
+    return [node.model_dump(mode="json") for node in tree]
+
+
 @router.post("")
 async def post_category(
     payload: CategoryCreate,

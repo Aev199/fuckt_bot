@@ -19,3 +19,12 @@ class CategoryRead(BaseModel):
     parent_id: int | None
     created_at: datetime
     materials_count: int = 0
+
+
+class CategoryTreeNode(BaseModel):
+    id: int
+    name: str
+    slug: str
+    parent_id: int | None
+    materials_count: int = 0
+    children: list["CategoryTreeNode"] = []

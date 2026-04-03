@@ -54,6 +54,10 @@ class MaterialRead(BaseModel):
     is_favorite: bool
     category_id: int | None
     category_name: str | None = None
+    top_category_id: int | None = None
+    top_category_name: str | None = None
+    subcategory_id: int | None = None
+    subcategory_name: str | None = None
     tags: list[str] = []
     attachments: list[MaterialAttachmentRead] = []
     created_at: datetime

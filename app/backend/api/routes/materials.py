@@ -19,7 +19,9 @@ router = APIRouter(prefix="/api/materials", tags=["materials"])
 async def get_materials(
     q: str | None = Query(default=None),
     category_id: int | None = Query(default=None),
+    top_category_id: int | None = Query(default=None),
     favorite: bool | None = Query(default=None),
+    has_attachments: bool | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     user: User = Depends(get_current_user),
@@ -30,7 +32,9 @@ async def get_materials(
         user_id=user.id,
         q=q,
         category_id=category_id,
+        top_category_id=top_category_id,
         favorite=favorite,
+        has_attachments=has_attachments,
         limit=limit,
         offset=offset,
     )

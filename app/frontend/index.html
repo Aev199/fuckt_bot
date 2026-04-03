@@ -10,94 +10,160 @@
   <body>
     <main class="layout">
       <header class="hero">
-        <p class="eyebrow">Web cabinet</p>
-        <h1>База знаний по геотехнике</h1>
-        <p class="subtitle">
-          Это текущий web-кабинет для просмотра и редактирования материалов. Следующим этапом он будет перестроен
-          в полноценный viewer-first справочник с деревом категорий.
-        </p>
-      </header>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Профиль</h2>
+        <div>
+          <p class="eyebrow">Knowledge Cabinet</p>
+          <h1>База знаний по геотехнике</h1>
+          <p class="subtitle">
+            Рабочий кабинет для просмотра материалов, поиска по базе и аккуратного редактирования для доверенных
+            аккаунтов.
+          </p>
+        </div>
+        <div class="hero-actions">
           <button id="refreshButton" class="ghost-button" type="button">Обновить</button>
         </div>
+      </header>
+
+      <section class="panel topbar">
         <div id="authStatus" class="status">Подключаем кабинет…</div>
         <div id="accessStatus" class="status secondary-status"></div>
         <div id="globalStatus" class="status-banner hidden"></div>
       </section>
 
-      <section class="grid">
-        <article class="panel">
-          <div class="panel-header">
-            <h2>Категории</h2>
-          </div>
-          <form id="categoryForm" class="stack-form">
-            <input id="categoryName" name="name" placeholder="Новая категория" required />
-            <button type="submit">Добавить категорию</button>
-          </form>
-          <div id="categoriesList" class="list"></div>
-        </article>
-
-        <article class="panel">
-          <div class="panel-header">
+      <section class="workspace">
+        <aside class="panel sidebar-panel">
+          <div class="panel-header compact-header">
             <div>
-              <h2 id="materialFormTitle">Добавить материал</h2>
-              <p id="materialFormSubtitle" class="panel-subtitle">Сохрани заметку, статью или выдержку.</p>
+              <h2>Категории</h2>
+              <p class="panel-subtitle">Один уровень вложенности: категория и подкатегория.</p>
             </div>
-            <button id="resetMaterialButton" class="ghost-button" type="button">Новый материал</button>
           </div>
-          <form id="materialForm" class="stack-form">
+
+          <div id="categoryTree" class="category-tree"></div>
+
+          <div id="categoryEditor" class="editor-stack">
+            <form id="rootCategoryForm" class="stack-form">
+              <label class="field-label" for="rootCategoryName">Новая категория</label>
+              <input id="rootCategoryName" name="name" placeholder="Например: Грунты" />
+              <button type="submit">Добавить категорию</button>
+            </form>
+
+            <form id="subcategoryForm" class="stack-form">
+              <label class="field-label" for="subcategoryParent">Новая подкатегория</label>
+              <select id="subcategoryParent" name="parent_id">
+                <option value="">Выбери категорию</option>
+              </select>
+              <input id="subcategoryName" name="name" placeholder="Например: Суглинки" />
+              <button type="submit">Добавить подкатегорию</button>
+            </form>
+          </div>
+        </aside>
+
+        <section class="panel list-panel">
+          <div class="panel-header list-header">
+            <div>
+              <h2>Материалы</h2>
+              <p id="listContext" class="panel-subtitle">Все материалы</p>
+            </div>
+            <button id="newMaterialButton" type="button">Новый материал</button>
+          </div>
+
+          <div class="toolbar">
+            <input id="searchInput" placeholder="Поиск по заголовку, тексту, тегам и источнику" />
+            <div class="filter-row">
+              <button class="ghost-button quick-filter is-active" type="button" data-filter="all">Все</button>
+              <button class="ghost-button quick-filter" type="button" data-filter="favorites">Избранное</button>
+              <button class="ghost-button quick-filter" type="button" data-filter="with-photos">С фото</button>
+              <button class="ghost-button quick-filter" type="button" data-filter="recent">Последние</button>
+            </div>
+          </div>
+
+          <div id="materialsList" class="materials"></div>
+        </section>
+
+        <section class="panel detail-panel">
+          <div id="detailView" class="detail-view">
+            <div id="detailEmpty" class="detail-empty">Выбери материал из списка, чтобы посмотреть детали.</div>
+
+            <div id="detailContent" class="hidden">
+              <div class="panel-header detail-header">
+                <div>
+                  <h2 id="detailTitle">Материал</h2>
+                  <p id="detailMeta" class="panel-subtitle"></p>
+                </div>
+                <div class="detail-actions">
+                  <button id="detailFavoriteButton" class="ghost-button" type="button">В избранное</button>
+                  <button id="editMaterialButton" class="ghost-button" type="button">Редактировать</button>
+                </div>
+              </div>
+
+              <div class="detail-section">
+                <div class="detail-label">Источник</div>
+                <div id="detailSource" class="detail-body"></div>
+              </div>
+
+              <div class="detail-section">
+                <div class="detail-label">Содержимое</div>
+                <div id="detailBody" class="detail-body"></div>
+              </div>
+
+              <div id="detailNotesSection" class="detail-section hidden">
+                <div class="detail-label">Заметки</div>
+                <div id="detailNotes" class="detail-body"></div>
+              </div>
+
+              <div class="detail-section">
+                <div class="detail-label">Теги</div>
+                <div id="detailTags" class="detail-tags"></div>
+              </div>
+
+              <div id="detailAttachmentsSection" class="detail-section hidden">
+                <div class="detail-label">Фотографии</div>
+                <div id="detailAttachments" class="attachment-grid"></div>
+              </div>
+            </div>
+          </div>
+
+          <form id="materialEditor" class="stack-form hidden">
+            <div class="panel-header compact-header">
+              <div>
+                <h2 id="editorTitle">Редактирование материала</h2>
+                <p class="panel-subtitle">Изменения сохраняются в базу знаний.</p>
+              </div>
+            </div>
+
             <input id="materialTitle" name="title" placeholder="Заголовок" required />
-            <textarea id="materialContent" name="content" rows="6" placeholder="Основной текст" required></textarea>
+            <textarea id="materialContent" name="content" rows="8" placeholder="Основной текст" required></textarea>
             <input id="materialSourceUrl" name="source_url" placeholder="Ссылка на источник" />
             <input id="materialSourceName" name="source_name" placeholder="Источник" />
             <textarea id="materialNotes" name="notes" rows="4" placeholder="Личные заметки"></textarea>
             <input id="materialTags" name="tags" placeholder="Теги через запятую" />
-            <select id="materialCategory" name="category_id">
+
+            <select id="materialTopCategory" name="top_category_id">
               <option value="">Без категории</option>
             </select>
+            <select id="materialSubcategory" name="category_id">
+              <option value="">Без подкатегории</option>
+            </select>
+
             <div class="action-row">
-              <button id="saveMaterialButton" type="submit">Сохранить материал</button>
+              <button id="saveMaterialButton" type="submit">Сохранить</button>
+              <button id="cancelEditButton" class="ghost-button" type="button">Отмена</button>
               <button id="deleteMaterialButton" class="ghost-button danger-button hidden" type="button">Удалить</button>
             </div>
           </form>
-        </article>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Материалы</h2>
-          <div class="filters">
-            <input id="searchInput" placeholder="Поиск по материалам" />
-            <select id="searchCategory">
-              <option value="">Все категории</option>
-            </select>
-            <label class="favorite-filter">
-              <input type="checkbox" id="favoriteOnly" />
-              Только избранное
-            </label>
-          </div>
-        </div>
-        <div id="materialsList" class="materials"></div>
-      </section>
-
-      <section class="panel">
-        <div class="panel-header">
-          <h2>Карточка материала</h2>
-        </div>
-        <div id="materialDetail" class="detail-empty">Выбери материал из списка, чтобы посмотреть детали.</div>
+        </section>
       </section>
     </main>
 
     <template id="materialTemplate">
       <article class="material-card">
         <div class="material-topline">
-          <h3 class="material-title"></h3>
+          <div>
+            <h3 class="material-title"></h3>
+            <p class="material-meta"></p>
+          </div>
           <button class="icon-button favorite-button" type="button">☆</button>
         </div>
-        <p class="material-meta"></p>
         <p class="material-content"></p>
         <p class="material-tags"></p>
         <div class="action-row compact">
